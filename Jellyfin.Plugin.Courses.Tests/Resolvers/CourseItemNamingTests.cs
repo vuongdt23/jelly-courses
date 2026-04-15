@@ -24,4 +24,28 @@ public class CourseItemNamingTests
         var result = CourseItemNaming.ParseSortIndex(name);
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("[FreeCourseSite.com] Udemy - Hibernate and Spring Data JPA Beginner to Guru", "Hibernate and Spring Data JPA Beginner to Guru")]
+    [InlineData("[ WebToolTip.com ] Udemy - Openstack Masterclass 2025", "Openstack Masterclass 2025")]
+    [InlineData("[GigaCourse.Com] Udemy - The Git & Github Bootcamp", "The Git & Github Bootcamp")]
+    [InlineData("[TutsNode.net] - LeetCode in Java", "LeetCode in Java")]
+    [InlineData("24. Technique - Vibrato", "Technique - Vibrato")]
+    [InlineData("7. Our first song", "Our first song")]
+    [InlineData("01 - Getting Started", "Getting Started")]
+    [InlineData("02 - Docker Images & Containers", "Docker Images & Containers")]
+    [InlineData("001-About-this-course-pbc2-onehack.us.mp4", "About this course")]
+    [InlineData("002-Introduction-DSMH-onehack.us.mp4", "Introduction")]
+    [InlineData("lesson10.mp4", "Lesson 10")]
+    [InlineData("lesson1.mp4", "Lesson 1")]
+    [InlineData("Chapter 1  Introduction", "Introduction")]
+    [InlineData("Chapter 8  Kubernetes Implementation", "Kubernetes Implementation")]
+    [InlineData("Docker & Kubernetes - The Practical Guide 2025 Jan Update", "Docker & Kubernetes - The Practical Guide 2025 Jan Update")]
+    [InlineData("Become a Violin Master from Scratch", "Become a Violin Master from Scratch")]
+    [InlineData("1. Twinkle Twinkle Little Star - Main theme.mp4", "Twinkle Twinkle Little Star - Main theme")]
+    public void CleanName_ProducesExpectedOutput(string name, string expected)
+    {
+        var result = CourseItemNaming.CleanName(name);
+        Assert.Equal(expected, result);
+    }
 }
