@@ -1,8 +1,9 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Jellyfin.Plugin.Courses.Resolvers;
 
-public static partial class CourseItemNaming
+public static class CourseItemNaming
 {
     private static readonly Regex LeadingNumberRegex = new(@"^(\d+)(?:\.\s+|\s+[-–]\s+|-)", RegexOptions.Compiled);
     private static readonly Regex LessonNumberRegex = new(@"^[Ll]esson\s*(\d+)", RegexOptions.Compiled);
@@ -15,19 +16,19 @@ public static partial class CourseItemNaming
         var lessonMatch = LessonNumberRegex.Match(baseName);
         if (lessonMatch.Success)
         {
-            return int.Parse(lessonMatch.Groups[1].Value);
+            return int.Parse(lessonMatch.Groups[1].Value, CultureInfo.InvariantCulture);
         }
 
         var chapterMatch = ChapterNumberRegex.Match(baseName);
         if (chapterMatch.Success)
         {
-            return int.Parse(chapterMatch.Groups[1].Value);
+            return int.Parse(chapterMatch.Groups[1].Value, CultureInfo.InvariantCulture);
         }
 
         var leadingMatch = LeadingNumberRegex.Match(baseName);
         if (leadingMatch.Success)
         {
-            return int.Parse(leadingMatch.Groups[1].Value);
+            return int.Parse(leadingMatch.Groups[1].Value, CultureInfo.InvariantCulture);
         }
 
         return null;
