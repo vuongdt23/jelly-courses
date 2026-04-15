@@ -7,6 +7,6 @@ services:
     volumes:
       - ./jellyfin/config:/config
       - ./jellyfin/cache:/cache
-      - /Volumes/storage/media/courses:/media/courses:ro
+      # - /Volumes/storage/media/courses:/media/courses:ro
       - ./test-courses:/media/test-courses:ro
     restart: unless-stopped

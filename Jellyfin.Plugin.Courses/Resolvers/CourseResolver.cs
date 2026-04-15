@@ -117,11 +117,12 @@ public class CourseResolver : IItemResolver
 
         var sortIndex = CourseItemNaming.ParseSortIndex(fileName) ?? 0;
         var cleanName = CourseItemNaming.CleanName(fileName);
+        var sectionSort = args.Parent is CourseSection section ? section.SortIndex : 0;
         return new CourseLesson
         {
             SortIndex = sortIndex,
             Name = sortIndex > 0 ? $"{sortIndex}. {cleanName}" : cleanName,
-            SortName = sortIndex.ToString("D4"),
+            SortName = CourseItemNaming.BuildSortName(sectionSort, sortIndex),
         };
     }
 

@@ -1,4 +1,3 @@
-using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.Courses.Model;
@@ -16,6 +15,4 @@ public class CourseSection : Folder
     public override bool SupportsAddingToPlaylist => true;
 
     public override bool IsPreSorted => true;
-
-    public override MediaType MediaType => MediaType.Video;
 }

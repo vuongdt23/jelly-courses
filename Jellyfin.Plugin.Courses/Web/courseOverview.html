@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course Overview</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #101010; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; }
+        a { color: #00a4dc; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .header { margin-bottom: 24px; }
+        .header h1 { font-size: 1.8em; margin-bottom: 8px; }
+        .header .meta { color: #999; font-size: 0.9em; }
+
+        .progress-bar { background: #333; border-radius: 4px; height: 8px; margin: 12px 0; overflow: hidden; }
+        .progress-bar .fill { background: #00a4dc; height: 100%; transition: width 0.3s; }
+
+        .continue-btn { background: #00a4dc; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1em; cursor: pointer; margin-bottom: 32px; display: inline-block; }
+        .continue-btn:hover { background: #0090c4; }
+
+        .section { background: #1a1a1a; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+        .section-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .section-header:hover { background: #222; }
+        .section-header h2 { font-size: 1.1em; font-weight: 500; }
+        .section-header .count { color: #999; font-size: 0.85em; white-space: nowrap; margin-left: 12px; }
+        .section-header .arrow { color: #666; transition: transform 0.2s; }
+        .section-header.open .arrow { transform: rotate(90deg); }
+
+        .section-progress { margin: 0 18px 0; }
+        .section-progress .progress-bar { height: 4px; margin: 0 0 4px; }
+
+        .lessons { display: none; padding: 0 18px 12px; }
+        .lessons.open { display: block; }
+
+        .lesson { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #252525; gap: 10px; }
+        .lesson:last-child { border-bottom: none; }
+        .lesson .status { width: 20px; text-align: center; flex-shrink: 0; }
+        .lesson .status.played { color: #4caf50; }
+        .lesson .status.unplayed { color: #555; }
+        .lesson .name { flex: 1; }
+        .lesson .name a { color: #ddd; }
+        .lesson .name a:hover { color: #00a4dc; }
+        .lesson .duration { color: #777; font-size: 0.85em; }
+
+        .loading { text-align: center; padding: 48px; color: #666; }
+        .error { text-align: center; padding: 48px; color: #f44; }
+    </style>
+</head>
+<body>
+    <div id="app" class="loading">Loading course...</div>
+
+    <script>
+    (function() {
+        var COURSE_ID = '{{COURSE_ID}}';
+        var app = document.getElementById('app');
+
+        function getAuth() {
+            try {
+                var creds = JSON.parse(localStorage.getItem('jellyfin_credentials') || '{}');
+                var server = (creds.Servers || [])[0];
+                if (server && server.AccessToken && server.UserId) {
+                    return { token: server.AccessToken, userId: server.UserId };
+                }
+            } catch(e) {}
+            return null;
+        }
+
+        function apiFetch(path) {
+            var auth = getAuth();
+            if (!auth) return Promise.reject(new Error('Not authenticated'));
+            var base = window.location.origin;
+            return fetch(base + path, {
+                headers: { 'Authorization': 'MediaBrowser Token="' + auth.token + '"' }
+            }).then(function(r) {
+                if (!r.ok) throw new Error('API error: ' + r.status);
+                return r.json();
+            });
+        }
+
+        function formatDuration(ticks) {
+            if (!ticks) return '';
+            var secs = Math.floor(ticks / 10000000);
+            var m = Math.floor(secs / 60);
+            var s = secs % 60;
+            if (m >= 60) {
+                var h = Math.floor(m / 60);
+                m = m % 60;
+                return h + 'h ' + m + 'm';
+            }
+            return m + ':' + (s < 10 ? '0' : '') + s;
+        }
+
+        function g(obj, key) { return obj[key] || obj[key.charAt(0).toLowerCase() + key.slice(1)]; }
+
+        function render(data) {
+            var name = g(data, 'Name');
+            var sections = g(data, 'Sections') || [];
+            var total = g(data, 'TotalLessons') || 0;
+            var completed = g(data, 'CompletedLessons') || 0;
+            var pct = g(data, 'ProgressPercent') || 0;
+
+            var html = '<div class="header">'
+                + '<h1>' + esc(name) + '</h1>'
+                + '<div class="meta">' + completed + ' / ' + total + ' lessons completed</div>'
+                + '<div class="progress-bar"><div class="fill" style="width:' + pct + '%"></div></div>'
+                + '</div>'
+                + '<button class="continue-btn" id="continueBtn">' + (completed >= total && total > 0 ? 'Replay Course' : 'Continue Course') + '</button>';
+
+            for (var i = 0; i < sections.length; i++) {
+                var sec = sections[i];
+                var sName = g(sec, 'Name');
+                var sLessons = g(sec, 'Lessons') || [];
+                var sCompleted = g(sec, 'CompletedCount') || 0;
+                var sTotal = g(sec, 'TotalCount') || 0;
+                var sPct = sTotal > 0 ? Math.round(sCompleted * 100 / sTotal) : 0;
+
+                html += '<div class="section">'
+                    + '<div class="section-header" data-idx="' + i + '">'
+                    + '<h2>' + esc(sName) + '</h2>'
+                    + '<div style="display:flex;align-items:center;gap:12px">'
+                    + '<span class="count">' + sCompleted + '/' + sTotal + '</span>'
+                    + '<span class="arrow">&#9654;</span>'
+                    + '</div></div>'
+                    + '<div class="section-progress"><div class="progress-bar"><div class="fill" style="width:' + sPct + '%"></div></div></div>'
+                    + '<div class="lessons" data-idx="' + i + '">';
+
+                for (var j = 0; j < sLessons.length; j++) {
+                    var l = sLessons[j];
+                    var lId = g(l, 'Id');
+                    var lName = g(l, 'Name');
+                    var played = g(l, 'Played');
+                    var rt = g(l, 'RunTimeTicks') || 0;
+
+                    html += '<div class="lesson">'
+                        + '<div class="status ' + (played ? 'played' : 'unplayed') + '">' + (played ? '&#10003;' : '&#9675;') + '</div>'
+                        + '<div class="name"><a href="' + window.location.origin + '/web/#/details?id=' + lId + '">' + esc(lName) + '</a></div>'
+                        + '<div class="duration">' + formatDuration(rt) + '</div>'
+                        + '</div>';
+                }
+
+                html += '</div></div>';
+            }
+
+            app.className = '';
+            app.innerHTML = html;
+
+            // Toggle sections
+            document.querySelectorAll('.section-header').forEach(function(hdr) {
+                hdr.addEventListener('click', function() {
+                    var idx = this.getAttribute('data-idx');
+                    var lessons = document.querySelector('.lessons[data-idx="' + idx + '"]');
+                    var isOpen = lessons.classList.contains('open');
+                    lessons.classList.toggle('open');
+                    this.classList.toggle('open');
+                });
+            });
+
+            // Continue button
+            document.getElementById('continueBtn').addEventListener('click', function() {
+                var auth = getAuth();
+                if (!auth) return;
+                apiFetch('/Courses/' + COURSE_ID + '/ContinueLesson?userId=' + auth.userId)
+                    .then(function(lesson) {
+                        var id = g(lesson, 'Id');
+                        window.location.href = window.location.origin + '/web/#/details?id=' + id;
+                    })
+                    .catch(function(e) { alert('Could not find next lesson.'); });
+            });
+
+            // Auto-open first uncompleted section
+            for (var i = 0; i < sections.length; i++) {
+                var sc = g(sections[i], 'CompletedCount') || 0;
+                var st = g(sections[i], 'TotalCount') || 0;
+                if (sc < st) {
+                    var hdr = document.querySelector('.section-header[data-idx="' + i + '"]');
+                    if (hdr) hdr.click();
+                    break;
+                }
+            }
+        }
+
+        function esc(s) {
+            var d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        var auth = getAuth();
+        if (!auth) {
+            app.className = 'error';
+            app.textContent = 'Not authenticated. Please log in to Jellyfin first.';
+            return;
+        }
+
+        apiFetch('/Courses/' + COURSE_ID + '/Structure?userId=' + auth.userId)
+            .then(render)
+            .catch(function(e) {
+                app.className = 'error';
+                app.textContent = 'Failed to load course: ' + e.message;
+            });
+    })();
+    </script>
+</body>
+</html>
