@@ -48,15 +48,14 @@ public class CourseResolver : IItemResolver
     /// <inheritdoc />
     public BaseItem? ResolvePath(ItemResolveArgs args)
     {
-        // Only activate for libraries with no specific collection type (i.e. "Mixed content").
-        // A dedicated "courses" CollectionType does not exist in the Jellyfin enum, so this is
-        // the closest match. If the parent is already a Course or CourseSection we always
-        // continue resolving children regardless of the collection type flag.
-        if (args.CollectionType is not null
-            && args.Parent is not Course
-            && args.Parent is not CourseSection)
+        // If the parent is already a Course or CourseSection, keep resolving children.
+        if (args.Parent is not Course and not CourseSection)
         {
-            return null;
+            // Otherwise, only activate for paths configured as course libraries.
+            if (!IsCourseLibraryPath(args.Path))
+            {
+                return null;
+            }
         }
 
         if (args.IsDirectory)
@@ -128,5 +127,31 @@ public class CourseResolver : IItemResolver
     {
         // "0. Websites you may like" pattern — common in pirated course bundles.
         return name.StartsWith("0.", StringComparison.Ordinal);
+    }
+
+    private static bool IsCourseLibraryPath(string path)
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config is null)
+        {
+            return false;
+        }
+
+        var libraryPaths = config.GetCourseLibraryPathSet();
+        if (libraryPaths.Count == 0)
+        {
+            return false;
+        }
+
+        // Check if the path starts with any configured library path.
+        foreach (var libPath in libraryPaths)
+        {
+            if (path.StartsWith(libPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

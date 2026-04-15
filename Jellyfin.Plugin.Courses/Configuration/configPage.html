@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Courses</title>
+</head>
+<body>
+    <div id="CoursesConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="CoursesConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel" for="txtCourseLibraryPaths">Course Library Paths</label>
+                        <input is="emby-input" type="text" id="txtCourseLibraryPaths"
+                               placeholder="/media/courses,/media/test-courses" />
+                        <div class="fieldDescription">
+                            Comma-separated list of media folder paths that contain courses.
+                            Only libraries using these paths will be resolved as course content.
+                        </div>
+                    </div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var CoursesConfig = {
+                pluginUniqueId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+            };
+
+            document.querySelector('#CoursesConfigPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(CoursesConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#txtCourseLibraryPaths').value = config.CourseLibraryPaths || '';
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#CoursesConfigForm')
+                .addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(CoursesConfig.pluginUniqueId).then(function (config) {
+                        config.CourseLibraryPaths = document.querySelector('#txtCourseLibraryPaths').value;
+                        ApiClient.updatePluginConfiguration(CoursesConfig.pluginUniqueId, config).then(function () {
+                            Dashboard.processPluginConfigurationUpdateResult();
+                        });
+                    });
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

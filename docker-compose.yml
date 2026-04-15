@@ -1,0 +1,12 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.7
+    container_name: jellyfin-courses-dev
+    ports:
+      - 8096:8096/tcp
+    volumes:
+      - ./jellyfin/config:/config
+      - ./jellyfin/cache:/cache
+      - /Volumes/storage/media/courses:/media/courses:ro
+      - ./test-courses:/media/test-courses:ro
+    restart: unless-stopped
