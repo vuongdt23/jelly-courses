@@ -1,15 +1,20 @@
 # Jellyfin Courses Plugin
 
-A Jellyfin plugin that adds a custom "Courses" library type for downloaded educational video content. Provides structured course navigation, sequential playback, and progress tracking — replacing the poor experience of using "Home Videos and Photos" for course libraries.
+A Jellyfin plugin for browsing and playing downloaded educational course videos. Resolves folder structures into Course > Section > Lesson hierarchy with clean display names and folder-level playback.
 
 ## Features
 
-- **Custom library type** — register a "Courses" library in Jellyfin pointed at your course folder
 - **Automatic structure detection** — parses folder hierarchies into Course > Section > Lesson
-- **Smart naming** — strips number prefixes, site tags, and junk from filenames
-- **Sequential playback** — auto-plays next lesson, with next/previous navigation
-- **Progress tracking** — per-lesson, per-section, and per-course completion status
-- **Course overview UI** — dedicated page with sections, lessons, and a "Continue Course" button
+- **Smart naming** — strips number prefixes, site tags, bracketed URLs, and junk suffixes from filenames while keeping sort indexes visible
+- **Folder-level playback** — play all videos in a course or section with a single click
+- **Junk filtering** — skips non-video files (.txt, .url, .nfo, etc.) and junk folders
+
+## Setup
+
+1. Build the plugin and copy the DLL to your Jellyfin plugins directory
+2. Create a library using the "Mixed content" type pointed at your courses folder
+3. Go to the plugin settings page and add your library path to **Course Library Paths**
+4. Scan the library
 
 ## Requirements
 
