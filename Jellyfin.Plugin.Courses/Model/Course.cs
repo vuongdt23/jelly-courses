@@ -4,4 +4,9 @@ namespace Jellyfin.Plugin.Courses.Model;
 
 public class Course : Folder
 {
+    public override string GetClientTypeName() => "Course";
+
+    public override bool IsDisplayedAsFolder => true;
+
+    public override bool SupportsDateLastMediaAdded => false;
 }
