@@ -79,10 +79,11 @@ public class CourseResolver : IItemResolver
         if (args.Parent is Course or CourseSection)
         {
             var sortIndex = CourseItemNaming.ParseSortIndex(name) ?? 0;
+            var cleanName = CourseItemNaming.CleanName(name);
             return new CourseSection
             {
                 SortIndex = sortIndex,
-                Name = CourseItemNaming.CleanName(name),
+                Name = sortIndex > 0 ? $"{sortIndex}. {cleanName}" : cleanName,
                 SortName = sortIndex.ToString("D4"),
             };
         }
@@ -115,10 +116,11 @@ public class CourseResolver : IItemResolver
         }
 
         var sortIndex = CourseItemNaming.ParseSortIndex(fileName) ?? 0;
+        var cleanName = CourseItemNaming.CleanName(fileName);
         return new CourseLesson
         {
             SortIndex = sortIndex,
-            Name = CourseItemNaming.CleanName(fileName),
+            Name = sortIndex > 0 ? $"{sortIndex}. {cleanName}" : cleanName,
             SortName = sortIndex.ToString("D4"),
         };
     }
