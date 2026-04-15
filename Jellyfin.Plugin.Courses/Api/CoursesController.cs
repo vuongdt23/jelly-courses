@@ -1,7 +1,9 @@
 using System.Reflection;
+using Jellyfin.Database.Implementations;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Courses.Api;
@@ -12,22 +14,26 @@ public class CoursesController : ControllerBase
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
+    private readonly IDbContextFactory<JellyfinDbContext> _dbContextFactory;
     private readonly ILogger<CoursesController> _logger;
 
     public CoursesController(
         ILibraryManager libraryManager,
         IUserDataManager userDataManager,
         IUserManager userManager,
+        IDbContextFactory<JellyfinDbContext> dbContextFactory,
         ILogger<CoursesController> logger)
     {
         _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _userManager = userManager;
+        _dbContextFactory = dbContextFactory;
         _logger = logger;
     }
 
     [HttpGet("client.js")]
     [Produces("application/javascript")]
+    [ResponseCache(NoStore = true)]
     public ActionResult GetClientScript()
     {
         var stream = Assembly.GetExecutingAssembly()
@@ -99,10 +105,11 @@ public class CoursesController : ControllerBase
         }
 
         var lessons = GetAllVideosInOrder(folder);
+        var playedMap = GetPlayedMap(userId, lessons.Select(l => l.Id));
         foreach (var lesson in lessons)
         {
-            var userData = _userDataManager.GetUserData(user, lesson);
-            if (userData is null || !userData.Played)
+            playedMap.TryGetValue(lesson.Id, out var isPlayed);
+            if (!isPlayed)
             {
                 return Ok(new LessonDto { Id = lesson.Id, Name = lesson.Name, SortName = lesson.SortName });
             }
@@ -119,6 +126,7 @@ public class CoursesController : ControllerBase
     }
 
     [HttpGet("{courseId}/Structure")]
+    [ResponseCache(NoStore = true)]
     public ActionResult GetStructure([FromRoute] Guid courseId, [FromQuery] Guid userId)
     {
         var item = _libraryManager.GetItemById(courseId);
@@ -136,33 +144,48 @@ public class CoursesController : ControllerBase
         }
 
         var children = folder.GetChildren(user, true);
-        var sections = new List<SectionDto>();
-        var flatLessons = new List<LessonProgressDto>();
 
+        // Collect all video IDs first, then batch-query played status from DB.
+        var allVideos = new List<(Video Video, Guid? SubfolderId, string? SubfolderName)>();
         foreach (var child in children.OrderBy(x => x.SortName))
         {
             if (child is Folder subfolder && child is not Video)
             {
-                // Subfolder = section
-                var sectionLessons = subfolder.GetChildren(user, true)
-                    .OfType<Video>()
-                    .OrderBy(l => l.SortName)
-                    .Select(l => ToLessonProgress(l, user))
-                    .ToList();
-
-                sections.Add(new SectionDto
+                foreach (var v in subfolder.GetChildren(user, true).OfType<Video>().OrderBy(l => l.SortName))
                 {
-                    Id = subfolder.Id,
-                    Name = subfolder.Name,
-                    SortIndex = sections.Count,
-                    Lessons = sectionLessons,
-                    CompletedCount = sectionLessons.Count(l => l.Played),
-                    TotalCount = sectionLessons.Count,
-                });
+                    allVideos.Add((v, subfolder.Id, subfolder.Name));
+                }
             }
             else if (child is Video video)
             {
-                flatLessons.Add(ToLessonProgress(video, user));
+                allVideos.Add((video, null, null));
+            }
+        }
+
+        var playedMap = GetPlayedMap(userId, allVideos.Select(v => v.Video.Id));
+        var sections = new List<SectionDto>();
+        var flatLessons = new List<LessonProgressDto>();
+
+        // Group by subfolder.
+        foreach (var group in allVideos.GroupBy(v => v.SubfolderId))
+        {
+            var lessons = group.Select(v => ToLessonProgress(v.Video, userId, playedMap)).ToList();
+
+            if (group.Key is null)
+            {
+                flatLessons.AddRange(lessons);
+            }
+            else
+            {
+                sections.Add(new SectionDto
+                {
+                    Id = group.Key.Value,
+                    Name = group.First().SubfolderName ?? string.Empty,
+                    SortIndex = sections.Count,
+                    Lessons = lessons,
+                    CompletedCount = lessons.Count(l => l.Played),
+                    TotalCount = lessons.Count,
+                });
             }
         }
 
@@ -237,18 +260,30 @@ public class CoursesController : ControllerBase
         return false;
     }
 
-    private LessonProgressDto ToLessonProgress(Video video, Jellyfin.Database.Implementations.Entities.User user)
+    private LessonProgressDto ToLessonProgress(Video video, Guid userId, Dictionary<Guid, bool> playedMap)
     {
-        var userData = _userDataManager.GetUserData(user, video);
+        playedMap.TryGetValue(video.Id, out var played);
         return new LessonProgressDto
         {
             Id = video.Id,
             Name = video.Name,
             SortIndex = 0,
-            Played = userData?.Played ?? false,
-            PlaybackPositionTicks = userData?.PlaybackPositionTicks ?? 0,
+            Played = played,
+            PlaybackPositionTicks = 0,
             RunTimeTicks = video.RunTimeTicks ?? 0,
         };
+    }
+
+    /// <summary>
+    /// Query the DB directly to get played status, bypassing the stale in-memory cache.
+    /// </summary>
+    private Dictionary<Guid, bool> GetPlayedMap(Guid userId, IEnumerable<Guid> itemIds)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+        var idSet = itemIds.ToHashSet();
+        return db.UserData
+            .Where(ud => ud.UserId == userId && idSet.Contains(ud.ItemId))
+            .ToDictionary(ud => ud.ItemId, ud => ud.Played);
     }
 
     private static Video[] GetAllVideosInOrder(Folder folder)
