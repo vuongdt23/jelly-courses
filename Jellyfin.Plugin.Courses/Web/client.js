@@ -130,11 +130,9 @@
         if (!auth) return;
         if (document.querySelector('.courses-plugin-overview')) return;
 
-        console.log('[Courses] Fetching structure for', itemId);
-        apiFetch('/Courses/' + itemId + '/Structure?userId=' + auth.userId)
+        apiFetch('/Courses/' + itemId + '/Structure?userId=' + auth.userId + '&_t=' + Date.now())
             .then(function (data) {
                 if (!data) return;
-                console.log('[Courses] Got structure:', data);
                 renderOverview(data, itemId);
             })
             .catch(function (err) {
