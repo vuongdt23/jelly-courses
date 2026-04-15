@@ -93,6 +93,11 @@ public static class CourseItemNaming
         return result;
     }
 
+    public static string BuildSortName(int sectionSortIndex, int lessonSortIndex)
+    {
+        return $"{sectionSortIndex:D4}-{lessonSortIndex:D4}";
+    }
+
     private static string StripExtension(string name)
     {
         var ext = Path.GetExtension(name);

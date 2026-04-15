@@ -48,4 +48,34 @@ public class CourseItemNamingTests
         var result = CourseItemNaming.CleanName(name);
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData(1, 1, "0001-0001")]
+    [InlineData(1, 2, "0001-0002")]
+    [InlineData(2, 1, "0002-0001")]
+    [InlineData(0, 5, "0000-0005")]
+    [InlineData(10, 99, "0010-0099")]
+    public void BuildSortName_FormatsCorrectly(int section, int lesson, string expected)
+    {
+        Assert.Equal(expected, CourseItemNaming.BuildSortName(section, lesson));
+    }
+
+    [Fact]
+    public void BuildSortName_LexicographicOrder_CrossesSections()
+    {
+        var names = new[]
+        {
+            CourseItemNaming.BuildSortName(2, 1),
+            CourseItemNaming.BuildSortName(1, 2),
+            CourseItemNaming.BuildSortName(1, 1),
+            CourseItemNaming.BuildSortName(2, 2),
+        };
+
+        var sorted = names.OrderBy(n => n).ToArray();
+
+        Assert.Equal("0001-0001", sorted[0]);
+        Assert.Equal("0001-0002", sorted[1]);
+        Assert.Equal("0002-0001", sorted[2]);
+        Assert.Equal("0002-0002", sorted[3]);
+    }
 }
