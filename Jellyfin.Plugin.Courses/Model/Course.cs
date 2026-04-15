@@ -4,7 +4,7 @@ namespace Jellyfin.Plugin.Courses.Model;
 
 public class Course : Folder
 {
-    public override string GetClientTypeName() => "Course";
+    public override string GetClientTypeName() => "Folder";
 
     public override bool IsDisplayedAsFolder => true;
 
