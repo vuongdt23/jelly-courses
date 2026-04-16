@@ -4,6 +4,121 @@
     var PLUGIN_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
     var COURSE_PATHS = null;
 
+    // Sidebar localStorage helpers
+    var SIDEBAR_OPEN_KEY = 'courses-sidebar-open';
+    var SIDEBAR_WIDTH_KEY = 'courses-sidebar-width';
+    var DEFAULT_WIDTH = 340;
+    var MIN_WIDTH = 280;
+    var MAX_WIDTH = 500;
+
+    function getSidebarOpen() {
+        var val = localStorage.getItem(SIDEBAR_OPEN_KEY);
+        return val === null ? true : val === 'true';
+    }
+    function setSidebarOpen(open) {
+        localStorage.setItem(SIDEBAR_OPEN_KEY, open ? 'true' : 'false');
+    }
+    function getSidebarWidth() {
+        var val = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY), 10);
+        return (val >= MIN_WIDTH && val <= MAX_WIDTH) ? val : DEFAULT_WIDTH;
+    }
+    function setSidebarWidth(w) {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
+    }
+
+    // Module-level sidebar state
+    var sidebarEl = null;
+    var backdropEl = null;
+    var lastCourseData = null;
+    var lastCourseId = null;
+    var lastProgressPct = 0;
+
+    // DOM helpers
+    function getHeaderHeight() {
+        var hdr = document.querySelector('.skinHeader');
+        return hdr ? hdr.offsetHeight : 0;
+    }
+
+    function getContentRoot() {
+        return document.querySelector('.skinBody') || document.querySelector('#reactRoot') || document.body;
+    }
+
+    function createSidebar() {
+        if (sidebarEl) return sidebarEl;
+        sidebarEl = document.createElement('div');
+        sidebarEl.className = 'cp-sidebar cp-hidden';
+        sidebarEl.style.top = getHeaderHeight() + 'px';
+        backdropEl = document.createElement('div');
+        backdropEl.className = 'cp-backdrop';
+        backdropEl.addEventListener('click', function() { collapseSidebar(); });
+        document.body.appendChild(sidebarEl);
+        document.body.appendChild(backdropEl);
+        return sidebarEl;
+    }
+
+    function pushContent(marginLeft) {
+        var root = getContentRoot();
+        if (!root) return;
+        if (!root.classList.contains('cp-content-push')) {
+            root.classList.add('cp-content-push');
+        }
+        root.style.marginLeft = marginLeft > 0 ? marginLeft + 'px' : '';
+    }
+
+    function expandSidebar() {
+        if (!sidebarEl) return;
+        var width = getSidebarWidth();
+        sidebarEl.className = 'cp-sidebar cp-expanded';
+        sidebarEl.style.width = width + 'px';
+        sidebarEl.style.top = getHeaderHeight() + 'px';
+        setSidebarOpen(true);
+        if (window.innerWidth < 768) {
+            backdropEl.style.display = 'block';
+            pushContent(0);
+        } else {
+            pushContent(width);
+        }
+    }
+
+    function renderCollapsedTab(progressPct) {
+        return '<div style="display:flex;flex-direction:column;align-items:center;padding-top:16px;height:100%;">'
+            + '<div class="cp-tab-label">COURSE</div>'
+            + '<div class="cp-tab-arrow">&#9656;</div>'
+            + '<div style="flex:1;"></div>'
+            + '<div class="cp-tab-progress">'
+            + '<div class="cp-tab-pfill" style="height:' + progressPct + '%;"></div>'
+            + '</div>'
+            + '<div style="height:16px;"></div>'
+            + '</div>';
+    }
+
+    function collapseSidebar() {
+        if (!sidebarEl) return;
+        sidebarEl.className = 'cp-sidebar cp-collapsed';
+        sidebarEl.style.width = '';
+        setSidebarOpen(false);
+        backdropEl.style.display = 'none';
+        if (window.innerWidth < 768) {
+            pushContent(0);
+        } else {
+            pushContent(28);
+        }
+        sidebarEl.innerHTML = renderCollapsedTab(lastProgressPct);
+        sidebarEl.addEventListener('click', function onTabClick() {
+            sidebarEl.removeEventListener('click', onTabClick);
+            expandSidebar();
+            renderSidebarContent(lastCourseData, lastCourseId);
+        });
+    }
+
+    function hideSidebar() {
+        if (!sidebarEl) return;
+        sidebarEl.className = 'cp-sidebar cp-hidden';
+        sidebarEl.style.width = '';
+        pushContent(0);
+        backdropEl.style.display = 'none';
+    }
+
 
     function getAuth() {
         try {
@@ -171,6 +286,79 @@
                 });
             })
             .catch(function () { });
+    }
+
+    function injectStyles() {
+        if (document.getElementById('cp-sidebar-styles')) return;
+        var style = document.createElement('style');
+        style.id = 'cp-sidebar-styles';
+        style.textContent = ''
+            // Sidebar shell
+            + '.cp-sidebar { position: fixed; left: 0; bottom: 0; z-index: 999; background: #111114; border-right: 1px solid #222; display: flex; flex-direction: column; transition: width 250ms ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }'
+            + '.cp-sidebar.cp-collapsed { width: 28px; cursor: pointer; overflow: hidden; }'
+            + '.cp-sidebar.cp-hidden { display: none; }'
+            // Tab handle (collapsed)
+            + '.cp-tab-label { writing-mode: vertical-rl; transform: rotate(180deg); color: #666; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }'
+            + '.cp-tab-arrow { color: #00a4dc; font-size: 12px; margin-top: 8px; }'
+            + '.cp-tab-progress { width: 4px; height: 60px; background: #222; border-radius: 2px; overflow: hidden; }'
+            + '.cp-tab-pfill { width: 100%; background: #00a4dc; border-radius: 2px; transition: height 0.3s; }'
+            // Header (expanded)
+            + '.cp-header { padding: 14px; background: linear-gradient(180deg, rgba(0,164,220,0.12) 0%, transparent 100%); border-bottom: 1px solid rgba(255,255,255,0.05); }'
+            + '.cp-course-icon { width: 28px; height: 28px; background: #00a4dc; border-radius: 5px; color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }'
+            + '.cp-course-name { color: #eee; font-size: 0.9em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-course-meta { color: #666; font-size: 0.75em; }'
+            + '.cp-close-btn { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; }'
+            + '.cp-close-btn:hover { color: #999; }'
+            // Segmented progress
+            + '.cp-seg-bar { display: flex; gap: 3px; height: 6px; margin: 10px 14px 0; }'
+            + '.cp-seg { border-radius: 2px; transition: background 0.3s; }'
+            + '.cp-seg.done { background: #4caf50; }'
+            + '.cp-seg.active { background: #00a4dc; }'
+            + '.cp-seg.pending { background: rgba(255,255,255,0.08); }'
+            // Continue button
+            + '.cp-continue-btn { margin: 10px 14px; background: linear-gradient(135deg, #00a4dc, #0090c4); color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: center; transition: opacity 0.2s; }'
+            + '.cp-continue-btn:hover { opacity: 0.9; }'
+            // Scrollable section list
+            + '.cp-sections { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 10px 10px; }'
+            + '.cp-section { border-radius: 5px; margin-bottom: 4px; }'
+            + '.cp-section.cp-sec-complete { opacity: 0.6; }'
+            + '.cp-section.cp-sec-active { background: rgba(0,164,220,0.06); border: 1px solid rgba(0,164,220,0.15); }'
+            + '.cp-section-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; }'
+            + '.cp-section-hdr:hover { background: rgba(255,255,255,0.04); }'
+            + '.cp-section-dot { font-size: 10px; flex-shrink: 0; }'
+            + '.cp-section-name { flex: 1; font-size: 0.85em; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-section-name.cp-struck { text-decoration: line-through; }'
+            + '.cp-section-count { font-size: 0.75em; color: #555; flex-shrink: 0; }'
+            + '.cp-section-badge { font-size: 0.65em; color: #4caf50; flex-shrink: 0; }'
+            + '.cp-section-play { background: none; border: 1px solid #444; color: #999; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.55em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
+            + '.cp-section-play:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
+            + '.cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; flex-shrink: 0; }'
+            + '.cp-section-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
+            // Lessons
+            + '.cp-lessons { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; border-left: 1px solid rgba(0,164,220,0.2); margin-left: 12px; }'
+            + '.cp-lessons.open { max-height: 5000px; }'
+            + '.cp-lesson { display: flex; align-items: center; padding: 4px 0; gap: 6px; border-radius: 3px; }'
+            + '.cp-lesson:hover { background: rgba(255,255,255,0.04); }'
+            + '.cp-lesson.cp-playing { background: rgba(0,164,220,0.1); padding: 4px 6px; margin: 0 -6px; }'
+            + '.cp-lesson.cp-lesson-next { background: rgba(0,164,220,0.08); border-left: 2px solid #00a4dc; padding-left: 4px; margin-left: -2px; }'
+            + '.cp-lesson-status { width: 14px; text-align: center; cursor: pointer; flex-shrink: 0; font-size: 0.75em; }'
+            + '.cp-lesson-status.played { color: #4caf50; }'
+            + '.cp-lesson-status.unplayed { color: #444; }'
+            + '.cp-lesson-name { flex: 1; min-width: 0; }'
+            + '.cp-lesson-name a { color: #888; text-decoration: none; font-size: 0.8em; }'
+            + '.cp-lesson-name a:hover { color: #00a4dc; }'
+            + '.cp-next-badge { background: #00a4dc; color: #fff; font-size: 0.55em; padding: 1px 4px; border-radius: 2px; flex-shrink: 0; }'
+            + '.cp-lesson-dur { color: #555; font-size: 0.7em; flex-shrink: 0; }'
+            // Resize handle
+            + '.cp-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 1000; }'
+            + '.cp-resize-handle::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 4px; height: 40px; background: rgba(255,255,255,0.1); border-radius: 2px; opacity: 0; transition: opacity 150ms; }'
+            + '.cp-resize-handle:hover::after { opacity: 1; }'
+            // Content push
+            + '.cp-content-push { transition: margin-left 250ms ease; }'
+            // Responsive
+            + '@media (max-width: 767px) { .cp-sidebar.cp-expanded { position: fixed; width: 85vw !important; max-width: 360px; box-shadow: 4px 0 20px rgba(0,0,0,0.5); } }'
+            + '.cp-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 998; display: none; }';
+        document.head.appendChild(style);
     }
 
     function getItemIdFromUrl() {
@@ -402,6 +590,8 @@
     }
 
     function init() {
+        injectStyles();
+        createSidebar();
         var lastUrl = '';
         var activeObserver = null;
 
