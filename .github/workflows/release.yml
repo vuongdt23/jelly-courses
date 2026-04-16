@@ -6,18 +6,13 @@ on:
       version:
         description: "Version (e.g. 1.0.2.0)"
         required: true
-  pull_request:
-    types: [closed]
-    branches: [main]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  # Phase 1: Triggered manually — creates a release PR with version bump + manifest update
-  create-release-pr:
-    if: github.event_name == 'workflow_dispatch'
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,6 +41,14 @@ jobs:
         id: checksum
         run: echo "md5=$(md5sum Jellyfin.Plugin.Courses.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      - name: Create tag and GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ inputs.version }}"
+          name: "v${{ inputs.version }}"
+          files: Jellyfin.Plugin.Courses.zip
+          generate_release_notes: true
+
       - name: Update manifest
         run: |
           VERSION="${{ inputs.version }}"
@@ -62,7 +65,7 @@ jobs:
                 timestamp: $ts
               }] + .[0].versions' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
 
-      - name: Create release PR
+      - name: Create manifest PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -81,46 +84,9 @@ jobs:
 
           - Bumped version in \`.csproj\` to \`${VERSION}\`
           - Updated \`manifest.json\` with checksum \`${{ steps.checksum.outputs.md5 }}\`
+          - GitHub Release and tag \`v${VERSION}\` already created
 
-          **Merging this PR will automatically create git tag \`v${VERSION}\` and a GitHub Release with the plugin zip.**
+          **Merge this PR to update the plugin manifest on main.**
           EOF
           )" \
             --base main --head "$BRANCH"
-
-  # Phase 2: Triggered when a release PR is merged — creates tag + GitHub Release
-  publish-release:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'release/')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "9.0.x"
-
-      - name: Extract version from csproj
-        id: version
-        run: |
-          VERSION=$(grep '<Version>' Jellyfin.Plugin.Courses/Jellyfin.Plugin.Courses.csproj | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Build
-        run: dotnet build Jellyfin.Plugin.Courses -c Release --nologo
-
-      - name: Create zip
-        run: |
-          cd Jellyfin.Plugin.Courses/bin/Release/net9.0
-          zip -j "$GITHUB_WORKSPACE/Jellyfin.Plugin.Courses.zip" Jellyfin.Plugin.Courses.dll
-
-      - name: Create tag and GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ steps.version.outputs.version }}"
-          name: "v${{ steps.version.outputs.version }}"
-          files: Jellyfin.Plugin.Courses.zip
-          generate_release_notes: true
