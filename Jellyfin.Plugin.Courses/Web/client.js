@@ -28,6 +28,72 @@
         });
     }
 
+    function apiFetchRaw(path, method) {
+        var auth = getAuth();
+        if (!auth) return Promise.reject(new Error('Not authenticated'));
+        return fetch(window.location.origin + path, {
+            method: method || 'GET',
+            headers: { 'Authorization': 'MediaBrowser Token="' + auth.token + '"' }
+        });
+    }
+
+    function togglePlayed(statusEl, container, sections) {
+        var auth = getAuth();
+        if (!auth) return;
+        var lessonId = statusEl.getAttribute('data-cp-toggle');
+        var isPlayed = statusEl.getAttribute('data-cp-played') === '1';
+        var newPlayed = !isPlayed;
+
+        // Optimistic DOM update — icon.
+        statusEl.setAttribute('data-cp-played', newPlayed ? '1' : '0');
+        statusEl.className = 'cp-lesson-status ' + (newPlayed ? 'played' : 'unplayed');
+        statusEl.title = newPlayed ? 'Mark unwatched' : 'Mark watched';
+        statusEl.innerHTML = newPlayed ? '&#10003;' : '&#9675;';
+
+        // Update section count text.
+        var sectionEl = statusEl.closest('.cp-section');
+        if (sectionEl) {
+            var countEl = sectionEl.querySelector('.cp-section-count');
+            var statuses = sectionEl.querySelectorAll('.cp-lesson-status[data-cp-toggle]');
+            var sPlayed = 0;
+            statuses.forEach(function (s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
+            var sTotal = statuses.length;
+            if (countEl) countEl.textContent = sPlayed + '/' + sTotal;
+            // Update section progress bar.
+            var pfill = sectionEl.querySelector('.cp-section-pfill');
+            if (pfill) {
+                var sPct = sTotal > 0 ? Math.round(sPlayed * 100 / sTotal) : 0;
+                pfill.style.width = sPct + '%';
+                pfill.className = 'cp-section-pfill ' + (sPlayed >= sTotal && sTotal > 0 ? 'cp-sec-done' : 'cp-sec-active');
+            }
+        }
+
+        // Update overall progress.
+        var allStatuses = container.querySelectorAll('.cp-lesson-status[data-cp-toggle]');
+        var totalPlayed = 0;
+        allStatuses.forEach(function (s) { if (s.getAttribute('data-cp-played') === '1') totalPlayed++; });
+        var totalAll = allStatuses.length;
+        var pctEl = container.querySelector('.cp-progress-text');
+        if (pctEl) pctEl.textContent = totalPlayed + ' / ' + totalAll + ' lessons';
+        var fillEl = container.querySelector('.cp-progress-fill');
+        if (fillEl) {
+            var newPct = totalAll > 0 ? Math.round(totalPlayed * 100 / totalAll) : 0;
+            fillEl.style.width = newPct + '%';
+            if (newPct >= 100) { fillEl.classList.add('cp-complete'); } else { fillEl.classList.remove('cp-complete'); }
+        }
+
+        // Fire API in background.
+        var method = isPlayed ? 'DELETE' : 'POST';
+        apiFetchRaw('/Users/' + auth.userId + '/PlayedItems/' + lessonId, method)
+            .catch(function () {
+                // Revert on failure.
+                statusEl.setAttribute('data-cp-played', isPlayed ? '1' : '0');
+                statusEl.className = 'cp-lesson-status ' + (isPlayed ? 'played' : 'unplayed');
+                statusEl.title = isPlayed ? 'Mark unwatched' : 'Mark watched';
+                statusEl.innerHTML = isPlayed ? '&#10003;' : '&#9675;';
+            });
+    }
+
     function esc(s) {
         var d = document.createElement('div');
         d.textContent = s || '';
@@ -117,10 +183,11 @@
     }
 
     function isCourseItem(item) {
-        var itemPath = item.Path || '';
+        var itemPath = (item.Path || '').replace(/\/+$/, '');
         if (!itemPath || !COURSE_PATHS || !COURSE_PATHS.length) return false;
         for (var i = 0; i < COURSE_PATHS.length; i++) {
-            if (itemPath.indexOf(COURSE_PATHS[i]) === 0) return true;
+            var cp = (COURSE_PATHS[i] || '').replace(/\/+$/, '');
+            if (itemPath.indexOf(cp) === 0 && itemPath !== cp) return true;
         }
         return false;
     }
@@ -168,30 +235,52 @@
 
         var html = '<style>'
             + '.courses-plugin-overview { padding: 0 1em 1em; }'
-            + '.cp-progress-header { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }'
+            // Progress header
+            + '.cp-progress-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }'
             + '.cp-progress-text { color: #999; font-size: 0.9em; }'
-            + '.cp-progress-bar { flex: 1; min-width: 120px; background: #333; border-radius: 4px; height: 6px; overflow: hidden; }'
-            + '.cp-progress-fill { background: #00a4dc; height: 100%; transition: width 0.3s; }'
-            + '.cp-continue-btn { background: #00a4dc; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }'
+            + '.cp-progress-bar { flex: 1; min-width: 120px; background: #333; border-radius: 4px; height: 8px; overflow: hidden; }'
+            + '.cp-progress-fill { background: #00a4dc; height: 100%; transition: width 0.3s; border-radius: 4px; }'
+            + '.cp-progress-fill.cp-complete { background: #4caf50; box-shadow: 0 0 8px rgba(76,175,80,0.3); }'
+            // Continue button
+            + '.cp-continue-btn { background: #00a4dc; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: 500; letter-spacing: 0.3px; transition: background 0.2s, transform 0.1s; }'
             + '.cp-continue-btn:hover { background: #0090c4; }'
+            + '.cp-continue-btn:active { transform: scale(0.98); }'
+            // Sections
             + '.cp-section { background: #1a1a1a; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }'
-            + '.cp-section-hdr { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }'
+            + '.cp-section-hdr { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; }'
             + '.cp-section-hdr:hover { background: #222; }'
-            + '.cp-section-hdr h3 { margin: 0; font-size: 1em; font-weight: 500; color: #eee; }'
-            + '.cp-section-count { color: #999; font-size: 0.8em; margin-left: 8px; }'
+            + '.cp-section-left { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }'
+            + '.cp-section-left h3 { margin: 0; font-size: 1em; font-weight: 500; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-section-count { color: #999; font-size: 0.8em; flex-shrink: 0; }'
+            + '.cp-section-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }'
+            + '.cp-section-play { background: none; border: 1px solid #444; color: #999; width: 26px; height: 26px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.65em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
+            + '.cp-section-play:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
             + '.cp-section-arrow { color: #666; transition: transform 0.2s; display: inline-block; }'
             + '.cp-section-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
-            + '.cp-lessons { display: none; padding: 0 14px 8px; }'
-            + '.cp-lessons.open { display: block; }'
-            + '.cp-lesson { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #252525; gap: 8px; }'
+            // Section progress bar
+            + '.cp-section-pbar-wrap { margin: 0 14px; }'
+            + '.cp-section-pbar { background: #333; border-radius: 2px; height: 3px; overflow: hidden; margin-bottom: 4px; }'
+            + '.cp-section-pfill { height: 100%; border-radius: 2px; transition: width 0.3s; }'
+            + '.cp-section-pfill.cp-sec-active { background: #00a4dc; }'
+            + '.cp-section-pfill.cp-sec-done { background: #4caf50; }'
+            // Lessons
+            + '.cp-lessons { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; padding: 0 14px; }'
+            + '.cp-lessons.open { max-height: 5000px; padding: 0 14px 8px; }'
+            + '.cp-lesson { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #252525; gap: 8px; transition: background 0.15s; border-radius: 3px; }'
             + '.cp-lesson:last-child { border-bottom: none; }'
-            + '.cp-lesson-status { width: 18px; text-align: center; flex-shrink: 0; }'
+            + '.cp-lesson:hover { background: rgba(255,255,255,0.03); }'
+            // Up next highlight
+            + '.cp-lesson.cp-lesson-next { background: rgba(0,164,220,0.08); border-left: 3px solid #00a4dc; padding-left: 5px; margin-left: -3px; }'
+            + '.cp-lesson.cp-lesson-next .cp-lesson-status { color: #00a4dc; }'
+            + '.cp-next-badge { background: #00a4dc; color: #fff; font-size: 0.6em; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }'
+            // Lesson details
+            + '.cp-lesson-status { width: 18px; text-align: center; flex-shrink: 0; cursor: pointer; }'
             + '.cp-lesson-status.played { color: #4caf50; }'
             + '.cp-lesson-status.unplayed { color: #555; }'
-            + '.cp-lesson-name { flex: 1; }'
+            + '.cp-lesson-name { flex: 1; min-width: 0; }'
             + '.cp-lesson-name a { color: #ddd; text-decoration: none; }'
             + '.cp-lesson-name a:hover { color: #00a4dc; }'
-            + '.cp-lesson-dur { color: #777; font-size: 0.8em; }'
+            + '.cp-lesson-dur { color: #777; font-size: 0.8em; flex-shrink: 0; }'
             + '</style>';
 
         html += '<div class="cp-progress-header">'
@@ -199,8 +288,10 @@
             + (completed >= total && total > 0 ? 'Replay Course' : 'Continue Course')
             + '</button>'
             + '<span class="cp-progress-text">' + completed + ' / ' + total + ' lessons</span>'
-            + '<div class="cp-progress-bar"><div class="cp-progress-fill" style="width:' + pct + '%"></div></div>'
+            + '<div class="cp-progress-bar"><div class="cp-progress-fill' + (pct >= 100 ? ' cp-complete' : '') + '" style="width:' + pct + '%"></div></div>'
             + '</div>';
+
+        var foundNext = false;
 
         for (var i = 0; i < sections.length; i++) {
             var sec = sections[i];
@@ -209,11 +300,23 @@
             var sCompleted = g(sec, 'CompletedCount') || 0;
             var sTotal = g(sec, 'TotalCount') || 0;
 
+            var sPct = sTotal > 0 ? Math.round(sCompleted * 100 / sTotal) : 0;
+            var secDone = sCompleted >= sTotal && sTotal > 0;
+
             html += '<div class="cp-section">'
                 + '<div class="cp-section-hdr" data-cpidx="' + i + '">'
-                + '<h3>' + esc(sName) + '<span class="cp-section-count">' + sCompleted + '/' + sTotal + '</span></h3>'
+                + '<div class="cp-section-left">'
+                + '<h3>' + esc(sName) + '</h3>'
+                + '<span class="cp-section-count">' + sCompleted + '/' + sTotal + '</span>'
+                + '</div>'
+                + '<div class="cp-section-right">'
+                + '<button class="cp-section-play" data-cp-section="' + i + '" title="Play section">&#9654;</button>'
                 + '<span class="cp-section-arrow">&#9654;</span>'
                 + '</div>'
+                + '</div>'
+                + '<div class="cp-section-pbar-wrap"><div class="cp-section-pbar">'
+                + '<div class="cp-section-pfill ' + (secDone ? 'cp-sec-done' : 'cp-sec-active') + '" style="width:' + sPct + '%"></div>'
+                + '</div></div>'
                 + '<div class="cp-lessons" data-cpidx="' + i + '">';
 
             for (var j = 0; j < sLessons.length; j++) {
@@ -222,11 +325,16 @@
                 var lName = g(l, 'Name');
                 var played = g(l, 'Played');
                 var rt = g(l, 'RunTimeTicks') || 0;
+                var isNext = !played && !foundNext;
+                if (isNext) foundNext = true;
 
-                html += '<div class="cp-lesson">'
-                    + '<div class="cp-lesson-status ' + (played ? 'played' : 'unplayed') + '">'
+                html += '<div class="cp-lesson' + (isNext ? ' cp-lesson-next' : '') + '">'
+                    + '<div class="cp-lesson-status ' + (played ? 'played' : 'unplayed')
+                    + '" data-cp-toggle="' + lId + '" data-cp-played="' + (played ? '1' : '0')
+                    + '" title="' + (played ? 'Mark unwatched' : 'Mark watched') + '">'
                     + (played ? '&#10003;' : '&#9675;') + '</div>'
                     + '<div class="cp-lesson-name"><a href="#!/details?id=' + lId + '">' + esc(lName) + '</a></div>'
+                    + (isNext ? '<span class="cp-next-badge">UP NEXT</span>' : '')
                     + '<div class="cp-lesson-dur">' + formatDuration(rt) + '</div>'
                     + '</div>';
             }
@@ -244,6 +352,26 @@
                 var lessons = container.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
                 lessons.classList.toggle('open');
                 this.classList.toggle('open');
+            });
+        });
+
+        // Section play buttons.
+        container.querySelectorAll('.cp-section-play').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var idx = parseInt(this.getAttribute('data-cp-section'));
+                var sec = sections[idx];
+                var lessons = g(sec, 'Lessons') || [];
+                var ids = lessons.map(function (l) { return g(l, 'Id'); });
+                playItems(ids);
+            });
+        });
+
+        // Toggle watched/unwatched status (optimistic client-side update).
+        container.querySelectorAll('.cp-lesson-status[data-cp-toggle]').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.stopPropagation();
+                togglePlayed(this, container, sections);
             });
         });
 
@@ -269,8 +397,8 @@
     }
 
     function cleanup() {
-        var existing = document.querySelector('.courses-plugin-overview');
-        if (existing) existing.remove();
+        var el = document.querySelector('.courses-plugin-overview');
+        if (el) el.remove();
     }
 
     function init() {
@@ -281,47 +409,37 @@
         // re-fetches with fresh progress data after playback.
         invalidateOverview = function () { lastUrl = ''; };
 
-        // Wait for an injection target to appear, then inject.
-        // Uses a short-lived MutationObserver scoped to this one page load.
-        function waitAndInject(itemId) {
-            // Already injected?
-            if (document.querySelector('.courses-plugin-overview')) return;
+        // Wait for the SPA page transition to settle, then inject.
+        // Uses a short delay + MutationObserver to avoid racing with Jellyfin's router.
+        function waitAndInjectGeneric(itemId, checkSelector, injectFn) {
+            if (document.querySelector(checkSelector)) return;
+            if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
 
-            // Try immediately first.
-            var target = document.querySelector('.page:not(.hide) .itemsContainer')
-                || document.querySelector('.page:not(.hide) .padded-left')
-                || document.querySelector('.detailPageContent');
-            if (target) {
-                injectCourseOverview(itemId);
-                return;
-            }
-
-            // Not ready yet — observe until it appears.
-            if (activeObserver) activeObserver.disconnect();
-            var root = document.querySelector('#reactRoot') || document.body;
-            activeObserver = new MutationObserver(function () {
-                if (document.querySelector('.courses-plugin-overview')) {
-                    activeObserver.disconnect();
-                    activeObserver = null;
-                    return;
-                }
+            function tryInject() {
+                if (document.querySelector(checkSelector)) return true;
                 var t = document.querySelector('.page:not(.hide) .itemsContainer')
                     || document.querySelector('.page:not(.hide) .padded-left')
                     || document.querySelector('.detailPageContent');
-                if (t) {
+                if (t) { injectFn(itemId); return true; }
+                return false;
+            }
+
+            // Try immediately first.
+            if (tryInject()) return;
+
+            // Not ready yet — observe until it appears.
+            var root = document.querySelector('#reactRoot') || document.body;
+            activeObserver = new MutationObserver(function () {
+                if (tryInject()) {
                     activeObserver.disconnect();
                     activeObserver = null;
-                    injectCourseOverview(itemId);
                 }
             });
             activeObserver.observe(root, { childList: true, subtree: true });
 
-            // Safety: disconnect after 10s no matter what.
+            // Safety: disconnect after 10s.
             setTimeout(function () {
-                if (activeObserver) {
-                    activeObserver.disconnect();
-                    activeObserver = null;
-                }
+                if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
             }, 10000);
         }
 
@@ -342,8 +460,10 @@
             apiFetch('/Items/' + itemId + '?Fields=Path').then(function (item) {
                 if (!item) return;
                 var isFolder = item.IsFolder || item.isFolder;
-                if (isCourseItem(item) && isFolder) {
-                    waitAndInject(itemId);
+                if (!isFolder) return;
+
+                if (isCourseItem(item)) {
+                    waitAndInjectGeneric(itemId, '.courses-plugin-overview', injectCourseOverview);
                 }
             }).catch(function () { });
         }
