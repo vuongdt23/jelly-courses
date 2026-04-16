@@ -541,21 +541,21 @@
     // when the user returns to the course page after playback.
     var invalidateOverview = function () {};
 
-    // Play a list of item IDs using the Sessions API.
+    // Play a list of item IDs using the Sessions API (max 100 to avoid URI limits).
     function playItems(itemIds) {
         if (!itemIds || !itemIds.length) return;
         var auth = getAuth();
         if (!auth) return;
-        // Mark overview as stale so it refreshes after playback.
         invalidateOverview();
+        itemIds = itemIds.slice(0, 100);
         apiFetch('/Sessions?ControllableByUserId=' + auth.userId)
             .then(function (sessions) {
                 if (!sessions || !sessions.length) return;
                 var sessionId = sessions[0].Id;
-                var idsParam = itemIds.join(',');
-                return fetch(window.location.origin + '/Sessions/' + sessionId + '/Playing?playCommand=PlayNow&itemIds=' + idsParam, {
+                return fetch(window.location.origin + '/Sessions/' + sessionId
+                    + '/Playing?playCommand=PlayNow&itemIds=' + itemIds.join(','), {
                     method: 'POST',
-                    headers: { 'Authorization': 'MediaBrowser Token="' + auth.token + '"' },
+                    headers: { 'Authorization': 'MediaBrowser Token="' + auth.token + '"' }
                 });
             })
             .catch(function () { });
