@@ -169,10 +169,10 @@
 
         // Header
         html += '<div class="cp-header">'
-            + '<div style="display:flex;align-items:center;justify-content:space-between;">'
-            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+            + '<div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">'
             + '<div class="cp-course-icon">' + esc(initial) + '</div>'
-            + '<div>'
+            + '<div style="min-width:0;flex:1;">'
             + '<div class="cp-course-name">' + esc(courseName) + '</div>'
             + '<div class="cp-course-meta">' + total + ' lessons \u00b7 ' + totalDuration + '</div>'
             + '</div>'
@@ -286,7 +286,8 @@
         // 1. Close button
         var closeBtn = document.getElementById('cpCloseBtn');
         if (closeBtn) {
-            closeBtn.addEventListener('click', function () {
+            closeBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
                 collapseSidebar();
             });
         }
@@ -294,7 +295,8 @@
         // 2. Continue button
         var continueBtn = document.getElementById('cpContinueBtn');
         if (continueBtn) {
-            continueBtn.addEventListener('click', function () {
+            continueBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
                 var ids = (completed >= total && total > 0)
                     ? getAllLessonIds(sections)
                     : getLessonIdsFromContinue(sections);
@@ -545,7 +547,8 @@
         style.id = 'cp-sidebar-styles';
         style.textContent = ''
             // Sidebar shell
-            + '.cp-sidebar { position: fixed; left: 0; bottom: 0; z-index: 999; background: #111114; border-right: 1px solid #222; display: flex; flex-direction: column; transition: width 250ms ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }'
+            + '.cp-sidebar { position: fixed; left: 0; bottom: 0; z-index: 999; background: #111114; border-right: 1px solid #222; display: flex; flex-direction: column; transition: width 250ms ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; box-sizing: border-box; }'
+            + '.cp-sidebar * { box-sizing: border-box; }'
             + '.cp-sidebar.cp-collapsed { width: 28px; cursor: pointer; overflow: hidden; }'
             + '.cp-sidebar.cp-hidden { display: none; }'
             // Tab handle (collapsed)
@@ -558,7 +561,7 @@
             + '.cp-course-icon { width: 28px; height: 28px; background: #00a4dc; border-radius: 5px; color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }'
             + '.cp-course-name { color: #eee; font-size: 0.9em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
             + '.cp-course-meta { color: #666; font-size: 0.75em; }'
-            + '.cp-close-btn { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; }'
+            + '.cp-close-btn { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 4px 2px; line-height: 1; flex-shrink: 0; z-index: 1; }'
             + '.cp-close-btn:hover { color: #999; }'
             // Segmented progress
             + '.cp-seg-bar { display: flex; gap: 3px; height: 6px; margin: 10px 14px 0; }'
@@ -567,7 +570,7 @@
             + '.cp-seg.active { background: #00a4dc; }'
             + '.cp-seg.pending { background: rgba(255,255,255,0.08); }'
             // Continue button
-            + '.cp-continue-btn { margin: 10px 14px; background: linear-gradient(135deg, #00a4dc, #0090c4); color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: center; transition: opacity 0.2s; }'
+            + '.cp-continue-btn { margin: 10px 14px; background: linear-gradient(135deg, #00a4dc, #0090c4); color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: center; transition: opacity 0.2s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'
             + '.cp-continue-btn:hover { opacity: 0.9; }'
             // Scrollable section list
             + '.cp-sections { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 10px 10px; }'
@@ -614,10 +617,12 @@
 
     function getItemIdFromUrl() {
         var hash = window.location.hash || '';
-        var idMatch = hash.match(/[?&]id=([a-f0-9]+)/i);
-        if (idMatch) return idMatch[1];
-        var parentMatch = hash.match(/[?&]parentId=([a-f0-9]+)/i);
-        if (parentMatch) return parentMatch[1];
+        // Match id, parentId, or topParentId — Jellyfin uses different URL patterns
+        // for detail pages vs folder/list views
+        var idMatch = hash.match(/[?&]id=([a-f0-9-]+)/i);
+        if (idMatch) return idMatch[1].replace(/-/g, '');
+        var parentMatch = hash.match(/[?&]parentId=([a-f0-9-]+)/i);
+        if (parentMatch) return parentMatch[1].replace(/-/g, '');
         return null;
     }
 
@@ -631,71 +636,28 @@
         return false;
     }
 
-    var lessonCourseCache = {};
-
-    function findCourseIdForItem(item) {
+    // Find the folder ID to use for /Courses/{id}/Structure.
+    // Any folder under a course library path is treated as a "course".
+    // For non-folder items (lessons), use the parent folder.
+    function findCourseFolderForItem(item) {
         var itemId = item.Id || item.id;
-        if (lessonCourseCache[itemId]) {
-            return Promise.resolve(lessonCourseCache[itemId]);
-        }
-        // Check if this item itself is the course root (parent path is a library root).
+
+        // If this item is a folder under a course path, use it directly.
         if ((item.IsFolder || item.isFolder) && isCourseItem(item)) {
-            var itemParentId = item.ParentId || item.parentId;
-            if (itemParentId) {
-                return apiFetch('/Items/' + itemParentId + '?Fields=Path').then(function(parentItem) {
-                    if (parentItem) {
-                        var pPath = (parentItem.Path || '').replace(/\/+$/, '');
-                        if (COURSE_PATHS && COURSE_PATHS.length) {
-                            for (var i = 0; i < COURSE_PATHS.length; i++) {
-                                var cp = (COURSE_PATHS[i] || '').replace(/\/+$/, '');
-                                if (pPath === cp) {
-                                    lessonCourseCache[itemId] = itemId;
-                                    return itemId;
-                                }
-                            }
-                        }
-                    }
-                    // Not the course root, walk up
-                    return walkUp(itemParentId);
-                });
-            }
+            return Promise.resolve(itemId);
         }
-        function walkUp(id, depth) {
-            if (!id || (depth || 0) > 10) return Promise.resolve(null);
-            return apiFetch('/Items/' + id + '?Fields=Path,ParentId').then(function(parent) {
-                if (!parent) return null;
-                var parentPath = (parent.Path || '').replace(/\/+$/, '');
-                if (!parentPath) return null;
-                if ((parent.IsFolder || parent.isFolder) && isCourseItem(parent)) {
-                    var parentParentId = parent.ParentId || parent.parentId;
-                    if (!parentParentId) {
-                        lessonCourseCache[itemId] = parent.Id || parent.id;
-                        return parent.Id || parent.id;
-                    }
-                    return apiFetch('/Items/' + parentParentId + '?Fields=Path').then(function(gp) {
-                        if (!gp) {
-                            lessonCourseCache[itemId] = parent.Id || parent.id;
-                            return parent.Id || parent.id;
-                        }
-                        var gpPath = (gp.Path || '').replace(/\/+$/, '');
-                        if (COURSE_PATHS && COURSE_PATHS.length) {
-                            for (var i = 0; i < COURSE_PATHS.length; i++) {
-                                var cp = (COURSE_PATHS[i] || '').replace(/\/+$/, '');
-                                if (gpPath === cp) {
-                                    lessonCourseCache[itemId] = parent.Id || parent.id;
-                                    return parent.Id || parent.id;
-                                }
-                            }
-                        }
-                        return walkUp(parent.ParentId || parent.parentId, (depth || 0) + 1);
-                    });
-                }
-                return null;
-            });
-        }
+
+        // For non-folder items, check if the parent is a course folder.
         var parentId = item.ParentId || item.parentId;
         if (!parentId) return Promise.resolve(null);
-        return walkUp(parentId);
+
+        return apiFetch('/Items/' + parentId + '?Fields=Path,ParentId').then(function(parent) {
+            if (!parent) return null;
+            if ((parent.IsFolder || parent.isFolder) && isCourseItem(parent)) {
+                return parent.Id || parent.id;
+            }
+            return null;
+        });
     }
 
     function init() {
@@ -718,7 +680,7 @@
             apiFetch('/Items/' + itemId + '?Fields=Path,ParentId').then(function(item) {
                 if (gen !== navGeneration) return;
                 if (!item) { hideSidebar(); return; }
-                findCourseIdForItem(item).then(function(courseId) {
+                findCourseFolderForItem(item).then(function(courseId) {
                     if (gen !== navGeneration) return;
                     if (!courseId) { hideSidebar(); return; }
                     var auth = getAuth();
