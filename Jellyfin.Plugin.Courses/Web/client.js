@@ -263,7 +263,7 @@
                     + '" data-cp-toggle="' + lId + '" data-cp-played="' + (played ? '1' : '0')
                     + '" title="' + statusTitle + '">'
                     + statusIcon + '</div>'
-                    + '<div class="cp-lesson-name"><a href="#!/details?id=' + lId + '">' + esc(lName) + '</a></div>';
+                    + '<div class="cp-lesson-name"><a href="#" data-cp-play="' + lId + '" data-cp-section="' + i + '">' + esc(lName) + '</a></div>';
                 if (isNext) {
                     html += '<span class="cp-next-badge">NEXT</span>';
                 }
@@ -339,7 +339,27 @@
             });
         });
 
-        // 6. Auto-open first uncompleted section
+        // 6. Lesson name click — play from that lesson to end of section
+        sidebarEl.querySelectorAll('a[data-cp-play]').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var lessonId = this.getAttribute('data-cp-play');
+                var secIdx = parseInt(this.getAttribute('data-cp-section'), 10);
+                var sec = sections[secIdx];
+                if (!sec) return;
+                var lessons = g(sec, 'Lessons') || [];
+                var ids = [];
+                var found = false;
+                for (var k = 0; k < lessons.length; k++) {
+                    if (g(lessons[k], 'Id') === lessonId) found = true;
+                    if (found) ids.push(g(lessons[k], 'Id'));
+                }
+                playItems(ids);
+            });
+        });
+
+        // 7. Auto-open first uncompleted section
         for (var ao = 0; ao < sections.length; ao++) {
             if ((g(sections[ao], 'CompletedCount') || 0) < (g(sections[ao], 'TotalCount') || 0)) {
                 var autoHdr = sidebarEl.querySelector('.cp-section-hdr[data-cpidx="' + ao + '"]');
@@ -599,7 +619,7 @@
             + '.cp-lesson-status.played { color: #4caf50; }'
             + '.cp-lesson-status.unplayed { color: #444; }'
             + '.cp-lesson-name { flex: 1; min-width: 0; }'
-            + '.cp-lesson-name a { color: #888; text-decoration: none; font-size: 0.8em; }'
+            + '.cp-lesson-name a { color: #888; text-decoration: none; font-size: 0.8em; cursor: pointer; }'
             + '.cp-lesson-name a:hover { color: #00a4dc; }'
             + '.cp-next-badge { background: #00a4dc; color: #fff; font-size: 0.55em; padding: 1px 4px; border-radius: 2px; flex-shrink: 0; }'
             + '.cp-lesson-dur { color: #555; font-size: 0.7em; flex-shrink: 0; }'
