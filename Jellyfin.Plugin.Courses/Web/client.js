@@ -119,6 +119,259 @@
         backdropEl.style.display = 'none';
     }
 
+    function renderSidebarContent(data, courseId) {
+        if (!data || !sidebarEl) return;
+
+        lastCourseData = data;
+        lastCourseId = courseId;
+
+        var sections = g(data, 'Sections') || [];
+        var total = g(data, 'TotalLessons') || 0;
+        var completed = g(data, 'CompletedLessons') || 0;
+        var pct = g(data, 'ProgressPercent') || 0;
+        var courseName = g(data, 'CourseName') || 'Course';
+
+        lastProgressPct = pct;
+
+        // Calculate total duration by summing all lesson RunTimeTicks.
+        var totalTicks = 0;
+        for (var si = 0; si < sections.length; si++) {
+            var sLessons = g(sections[si], 'Lessons') || [];
+            for (var li = 0; li < sLessons.length; li++) {
+                totalTicks += g(sLessons[li], 'RunTimeTicks') || 0;
+            }
+        }
+        var totalDuration = formatDuration(totalTicks);
+
+        // Find next unplayed lesson name for the continue button.
+        var nextLessonName = '';
+        for (var ni = 0; ni < sections.length; ni++) {
+            var nLessons = g(sections[ni], 'Lessons') || [];
+            for (var nj = 0; nj < nLessons.length; nj++) {
+                if (!g(nLessons[nj], 'Played')) {
+                    nextLessonName = g(nLessons[nj], 'Name') || '';
+                    break;
+                }
+            }
+            if (nextLessonName) break;
+        }
+
+        var initial = courseName.charAt(0).toUpperCase();
+
+        // --- Build HTML ---
+        var html = '';
+
+        // Header
+        html += '<div class="cp-header">'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<div class="cp-course-icon">' + esc(initial) + '</div>'
+            + '<div>'
+            + '<div class="cp-course-name">' + esc(courseName) + '</div>'
+            + '<div class="cp-course-meta">' + total + ' lessons \u00b7 ' + totalDuration + '</div>'
+            + '</div>'
+            + '</div>'
+            + '<button class="cp-close-btn" id="cpCloseBtn" title="Collapse sidebar">\u00d7</button>'
+            + '</div>'
+            + '</div>';
+
+        // Segmented progress bar
+        html += '<div class="cp-seg-bar">';
+        for (var sgi = 0; sgi < sections.length; sgi++) {
+            var sgSec = sections[sgi];
+            var sgCompleted = g(sgSec, 'CompletedCount') || 0;
+            var sgTotal = g(sgSec, 'TotalCount') || 0;
+            var sgClass = 'pending';
+            if (sgTotal > 0 && sgCompleted >= sgTotal) {
+                sgClass = 'done';
+            } else if (sgCompleted > 0) {
+                sgClass = 'active';
+            }
+            html += '<div class="cp-seg ' + sgClass + '" style="flex:' + sgTotal + ';"></div>';
+        }
+        html += '</div>';
+
+        // Continue button
+        if (completed >= total && total > 0) {
+            html += '<div class="cp-continue-btn" id="cpContinueBtn">\u25b6 Replay Course</div>';
+        } else {
+            html += '<div class="cp-continue-btn" id="cpContinueBtn">\u25b6 Continue \u2014 ' + esc(nextLessonName) + '</div>';
+        }
+
+        // Scrollable section list
+        var foundNext = false;
+        html += '<div class="cp-sections">';
+
+        for (var i = 0; i < sections.length; i++) {
+            var sec = sections[i];
+            var sName = g(sec, 'Name') || '';
+            var sLess = g(sec, 'Lessons') || [];
+            var sCompleted = g(sec, 'CompletedCount') || 0;
+            var sTotal = g(sec, 'TotalCount') || 0;
+            var secDone = sTotal > 0 && sCompleted >= sTotal;
+            var secActive = !secDone && sCompleted > 0;
+
+            var secClass = 'cp-section';
+            if (secDone) secClass += ' cp-sec-complete';
+            else if (secActive) secClass += ' cp-sec-active';
+
+            var dotColor = '#666';
+            var dotChar = '\u25cb';
+            if (secDone) {
+                dotColor = '#4caf50';
+                dotChar = '\u25cf';
+            } else if (secActive) {
+                dotColor = '#00a4dc';
+                dotChar = '\u25cf';
+            }
+
+            html += '<div class="' + secClass + '">'
+                + '<div class="cp-section-hdr" data-cpidx="' + i + '">'
+                + '<span class="cp-section-dot" style="color:' + dotColor + ';">' + dotChar + '</span>'
+                + '<span class="cp-section-name' + (secDone ? ' cp-struck' : '') + '">' + esc(sName) + '</span>';
+            if (secDone) {
+                html += '<span class="cp-section-badge">DONE</span>';
+            }
+            html += '<span class="cp-section-count">' + sCompleted + '/' + sTotal + '</span>'
+                + '<button class="cp-section-play" data-cp-section="' + i + '" title="Play section">\u25b6</button>'
+                + '<span class="cp-section-arrow">\u25b6</span>'
+                + '</div>';
+
+            html += '<div class="cp-lessons" data-cpidx="' + i + '">';
+
+            for (var j = 0; j < sLess.length; j++) {
+                var l = sLess[j];
+                var lId = g(l, 'Id');
+                var lName = g(l, 'Name') || '';
+                var played = g(l, 'Played');
+                var rt = g(l, 'RunTimeTicks') || 0;
+                var isNext = !played && !foundNext;
+                if (isNext) foundNext = true;
+
+                var statusClass = played ? 'played' : 'unplayed';
+                var statusIcon = played ? '&#10003;' : (isNext ? '&#9656;' : '&#9675;');
+                var statusTitle = played ? 'Mark unwatched' : 'Mark watched';
+
+                html += '<div class="cp-lesson' + (isNext ? ' cp-lesson-next' : '') + '">'
+                    + '<div class="cp-lesson-status ' + statusClass
+                    + '" data-cp-toggle="' + lId + '" data-cp-played="' + (played ? '1' : '0')
+                    + '" title="' + statusTitle + '">'
+                    + statusIcon + '</div>'
+                    + '<div class="cp-lesson-name"><a href="#!/details?id=' + lId + '">' + esc(lName) + '</a></div>';
+                if (isNext) {
+                    html += '<span class="cp-next-badge">NEXT</span>';
+                }
+                html += '<div class="cp-lesson-dur">' + formatDuration(rt) + '</div>'
+                    + '</div>';
+            }
+
+            html += '</div></div>';
+        }
+
+        html += '</div>';
+
+        // Resize handle
+        html += '<div class="cp-resize-handle" id="cpResizeHandle"></div>';
+
+        sidebarEl.innerHTML = html;
+
+        // --- Wire up event listeners ---
+
+        // 1. Close button
+        var closeBtn = document.getElementById('cpCloseBtn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function () {
+                collapseSidebar();
+            });
+        }
+
+        // 2. Continue button
+        var continueBtn = document.getElementById('cpContinueBtn');
+        if (continueBtn) {
+            continueBtn.addEventListener('click', function () {
+                var ids = (completed >= total && total > 0)
+                    ? getAllLessonIds(sections)
+                    : getLessonIdsFromContinue(sections);
+                playItems(ids);
+            });
+        }
+
+        // 3. Section headers — toggle open/close
+        sidebarEl.querySelectorAll('.cp-section-hdr').forEach(function (hdr) {
+            hdr.addEventListener('click', function (e) {
+                if (e.target.closest('.cp-section-play')) return;
+                var idx = this.getAttribute('data-cpidx');
+                var lessonsDiv = sidebarEl.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
+                if (lessonsDiv) lessonsDiv.classList.toggle('open');
+                this.classList.toggle('open');
+            });
+        });
+
+        // 4. Section play buttons
+        sidebarEl.querySelectorAll('.cp-section-play').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var idx = parseInt(this.getAttribute('data-cp-section'), 10);
+                var sec = sections[idx];
+                if (!sec) return;
+                var lessons = g(sec, 'Lessons') || [];
+                var ids = [];
+                for (var k = 0; k < lessons.length; k++) {
+                    ids.push(g(lessons[k], 'Id'));
+                }
+                playItems(ids);
+            });
+        });
+
+        // 5. Toggle played status
+        sidebarEl.querySelectorAll('.cp-lesson-status[data-cp-toggle]').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.stopPropagation();
+                togglePlayed(this, sidebarEl, sections);
+            });
+        });
+
+        // 6. Auto-open first uncompleted section
+        for (var ao = 0; ao < sections.length; ao++) {
+            if ((g(sections[ao], 'CompletedCount') || 0) < (g(sections[ao], 'TotalCount') || 0)) {
+                var autoHdr = sidebarEl.querySelector('.cp-section-hdr[data-cpidx="' + ao + '"]');
+                if (autoHdr) autoHdr.click();
+                break;
+            }
+        }
+
+        // --- Resize handle logic ---
+        var resizeHandle = document.getElementById('cpResizeHandle');
+        if (resizeHandle) {
+            var startX, startWidth;
+            function onMouseMove(e) {
+                var newWidth = startWidth + (e.clientX - startX);
+                newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+                sidebarEl.style.width = newWidth + 'px';
+                pushContent(newWidth);
+            }
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                var finalWidth = parseInt(sidebarEl.style.width, 10);
+                if (finalWidth >= MIN_WIDTH && finalWidth <= MAX_WIDTH) {
+                    setSidebarWidth(finalWidth);
+                }
+            }
+            resizeHandle.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                startX = e.clientX;
+                startWidth = parseInt(sidebarEl.style.width, 10) || getSidebarWidth();
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+        }
+    }
+
 
     function getAuth() {
         try {
