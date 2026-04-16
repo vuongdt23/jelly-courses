@@ -94,8 +94,12 @@
 
     function collapseSidebar() {
         if (!sidebarEl) return;
+        if (sidebarEl._onTabClick) {
+            sidebarEl.removeEventListener('click', sidebarEl._onTabClick);
+        }
         sidebarEl.className = 'cp-sidebar cp-collapsed';
         sidebarEl.style.width = '';
+        sidebarEl.style.top = getHeaderHeight() + 'px';
         setSidebarOpen(false);
         backdropEl.style.display = 'none';
         if (window.innerWidth < 768) {
@@ -104,11 +108,13 @@
             pushContent(28);
         }
         sidebarEl.innerHTML = renderCollapsedTab(lastProgressPct);
-        sidebarEl.addEventListener('click', function onTabClick() {
-            sidebarEl.removeEventListener('click', onTabClick);
+        sidebarEl._onTabClick = function() {
+            sidebarEl.removeEventListener('click', sidebarEl._onTabClick);
+            sidebarEl._onTabClick = null;
             expandSidebar();
             renderSidebarContent(lastCourseData, lastCourseId);
-        });
+        };
+        sidebarEl.addEventListener('click', sidebarEl._onTabClick);
     }
 
     function hideSidebar() {
@@ -129,7 +135,7 @@
         var total = g(data, 'TotalLessons') || 0;
         var completed = g(data, 'CompletedLessons') || 0;
         var pct = g(data, 'ProgressPercent') || 0;
-        var courseName = g(data, 'CourseName') || 'Course';
+        var courseName = g(data, 'Name') || 'Course';
 
         lastProgressPct = pct;
 
@@ -427,27 +433,6 @@
             statuses.forEach(function (s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
             var sTotal = statuses.length;
             if (countEl) countEl.textContent = sPlayed + '/' + sTotal;
-            // Update section progress bar.
-            var pfill = sectionEl.querySelector('.cp-section-pfill');
-            if (pfill) {
-                var sPct = sTotal > 0 ? Math.round(sPlayed * 100 / sTotal) : 0;
-                pfill.style.width = sPct + '%';
-                pfill.className = 'cp-section-pfill ' + (sPlayed >= sTotal && sTotal > 0 ? 'cp-sec-done' : 'cp-sec-active');
-            }
-        }
-
-        // Update overall progress.
-        var allStatuses = container.querySelectorAll('.cp-lesson-status[data-cp-toggle]');
-        var totalPlayed = 0;
-        allStatuses.forEach(function (s) { if (s.getAttribute('data-cp-played') === '1') totalPlayed++; });
-        var totalAll = allStatuses.length;
-        var pctEl = container.querySelector('.cp-progress-text');
-        if (pctEl) pctEl.textContent = totalPlayed + ' / ' + totalAll + ' lessons';
-        var fillEl = container.querySelector('.cp-progress-fill');
-        if (fillEl) {
-            var newPct = totalAll > 0 ? Math.round(totalPlayed * 100 / totalAll) : 0;
-            fillEl.style.width = newPct + '%';
-            if (newPct >= 100) { fillEl.classList.add('cp-complete'); } else { fillEl.classList.remove('cp-complete'); }
         }
 
         // Update segmented progress bar
@@ -623,7 +608,7 @@
             + '.cp-content-push { transition: margin-left 250ms ease; }'
             // Responsive
             + '@media (max-width: 767px) { .cp-sidebar.cp-expanded { position: fixed; width: 85vw !important; max-width: 360px; box-shadow: 4px 0 20px rgba(0,0,0,0.5); } }'
-            + '.cp-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 998; display: none; }';
+            + '.cp-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.5); z-index: 998; display: none; }';
         document.head.appendChild(style);
     }
 
@@ -649,14 +634,34 @@
     var lessonCourseCache = {};
 
     function findCourseIdForItem(item) {
-        if ((item.IsFolder || item.isFolder) && isCourseItem(item)) {
-            return Promise.resolve(item.Id || item.id);
-        }
         var itemId = item.Id || item.id;
         if (lessonCourseCache[itemId]) {
             return Promise.resolve(lessonCourseCache[itemId]);
         }
-        function walkUp(id) {
+        // Check if this item itself is the course root (parent path is a library root).
+        if ((item.IsFolder || item.isFolder) && isCourseItem(item)) {
+            var itemParentId = item.ParentId || item.parentId;
+            if (itemParentId) {
+                return apiFetch('/Items/' + itemParentId + '?Fields=Path').then(function(parentItem) {
+                    if (parentItem) {
+                        var pPath = (parentItem.Path || '').replace(/\/+$/, '');
+                        if (COURSE_PATHS && COURSE_PATHS.length) {
+                            for (var i = 0; i < COURSE_PATHS.length; i++) {
+                                var cp = (COURSE_PATHS[i] || '').replace(/\/+$/, '');
+                                if (pPath === cp) {
+                                    lessonCourseCache[itemId] = itemId;
+                                    return itemId;
+                                }
+                            }
+                        }
+                    }
+                    // Not the course root, walk up
+                    return walkUp(itemParentId);
+                });
+            }
+        }
+        function walkUp(id, depth) {
+            if (!id || (depth || 0) > 10) return Promise.resolve(null);
             return apiFetch('/Items/' + id + '?Fields=Path,ParentId').then(function(parent) {
                 if (!parent) return null;
                 var parentPath = (parent.Path || '').replace(/\/+$/, '');
@@ -682,7 +687,7 @@
                                 }
                             }
                         }
-                        return walkUp(parent.Id || parent.id);
+                        return walkUp(parent.ParentId || parent.parentId, (depth || 0) + 1);
                     });
                 }
                 return null;
@@ -697,25 +702,30 @@
         injectStyles();
         createSidebar();
         var lastUrl = '';
+        var navGeneration = 0;
         invalidateOverview = function() { lastUrl = ''; };
 
         function onPageChange() {
             var url = window.location.hash;
             if (url === lastUrl) return;
             lastUrl = url;
+            var gen = ++navGeneration;
             var itemId = getItemIdFromUrl();
             if (!itemId || !COURSE_PATHS || !COURSE_PATHS.length) {
                 hideSidebar();
                 return;
             }
             apiFetch('/Items/' + itemId + '?Fields=Path,ParentId').then(function(item) {
+                if (gen !== navGeneration) return;
                 if (!item) { hideSidebar(); return; }
                 findCourseIdForItem(item).then(function(courseId) {
+                    if (gen !== navGeneration) return;
                     if (!courseId) { hideSidebar(); return; }
                     var auth = getAuth();
                     if (!auth) { hideSidebar(); return; }
                     apiFetch('/Courses/' + courseId + '/Structure?userId=' + auth.userId + '&_t=' + Date.now())
                         .then(function(data) {
+                            if (gen !== navGeneration) return;
                             if (!data) { hideSidebar(); return; }
                             if (getSidebarOpen()) {
                                 expandSidebar();
@@ -727,9 +737,9 @@
                                 collapseSidebar();
                             }
                         })
-                        .catch(function() { hideSidebar(); });
-                }).catch(function() { hideSidebar(); });
-            }).catch(function() { hideSidebar(); });
+                        .catch(function() { if (gen === navGeneration) hideSidebar(); });
+                }).catch(function() { if (gen === navGeneration) hideSidebar(); });
+            }).catch(function() { if (gen === navGeneration) hideSidebar(); });
         }
 
         document.addEventListener('visibilitychange', function() {
