@@ -450,6 +450,19 @@
             if (newPct >= 100) { fillEl.classList.add('cp-complete'); } else { fillEl.classList.remove('cp-complete'); }
         }
 
+        // Update segmented progress bar
+        var segs = container.querySelectorAll('.cp-seg');
+        var sectionEls = container.querySelectorAll('.cp-section');
+        sectionEls.forEach(function(secEl, idx) {
+            var statuses = secEl.querySelectorAll('.cp-lesson-status[data-cp-toggle]');
+            var sPlayed = 0;
+            statuses.forEach(function(s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
+            var sTotal = statuses.length;
+            if (segs[idx]) {
+                segs[idx].className = 'cp-seg ' + (sPlayed >= sTotal && sTotal > 0 ? 'done' : sPlayed > 0 ? 'active' : 'pending');
+            }
+        });
+
         // Fire API in background.
         var method = isPlayed ? 'DELETE' : 'POST';
         apiFetchRaw('/Users/' + auth.userId + '/PlayedItems/' + lessonId, method)
@@ -633,309 +646,107 @@
         return false;
     }
 
-    function injectCourseOverview(itemId) {
-        var auth = getAuth();
-        if (!auth) return;
-        if (document.querySelector('.courses-plugin-overview')) return;
+    var lessonCourseCache = {};
 
-        apiFetch('/Courses/' + itemId + '/Structure?userId=' + auth.userId + '&_t=' + Date.now())
-            .then(function (data) {
-                if (!data) return;
-                renderOverview(data, itemId);
-            })
-            .catch(function (err) {
-                console.warn('[Courses] Structure fetch failed:', err);
-            });
-    }
-
-    function renderOverview(data, courseId) {
-        if (document.querySelector('.courses-plugin-overview')) return;
-
-        var selectors = [
-            '.page:not(.hide) .itemsContainer',
-            '.page:not(.hide) .padded-left',
-            '.page:not(.hide) [data-role="content"]',
-            '.detailPageContent',
-            '#reactRoot .page:not(.hide)',
-            '#reactRoot [class*="Page"]',
-        ];
-        var target = null;
-        for (var i = 0; i < selectors.length; i++) {
-            target = document.querySelector(selectors[i]);
-            if (target) break;
+    function findCourseIdForItem(item) {
+        if ((item.IsFolder || item.isFolder) && isCourseItem(item)) {
+            return Promise.resolve(item.Id || item.id);
         }
-        if (!target) return;
-
-        var sections = g(data, 'Sections') || [];
-        var total = g(data, 'TotalLessons') || 0;
-        var completed = g(data, 'CompletedLessons') || 0;
-        var pct = g(data, 'ProgressPercent') || 0;
-
-        var container = document.createElement('div');
-        container.className = 'courses-plugin-overview';
-
-        var html = '<style>'
-            + '.courses-plugin-overview { padding: 0 1em 1em; }'
-            // Progress header
-            + '.cp-progress-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }'
-            + '.cp-progress-text { color: #999; font-size: 0.9em; }'
-            + '.cp-progress-bar { flex: 1; min-width: 120px; background: #333; border-radius: 4px; height: 8px; overflow: hidden; }'
-            + '.cp-progress-fill { background: #00a4dc; height: 100%; transition: width 0.3s; border-radius: 4px; }'
-            + '.cp-progress-fill.cp-complete { background: #4caf50; box-shadow: 0 0 8px rgba(76,175,80,0.3); }'
-            // Continue button
-            + '.cp-continue-btn { background: #00a4dc; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: 500; letter-spacing: 0.3px; transition: background 0.2s, transform 0.1s; }'
-            + '.cp-continue-btn:hover { background: #0090c4; }'
-            + '.cp-continue-btn:active { transform: scale(0.98); }'
-            // Sections
-            + '.cp-section { background: #1a1a1a; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }'
-            + '.cp-section-hdr { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; }'
-            + '.cp-section-hdr:hover { background: #222; }'
-            + '.cp-section-left { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }'
-            + '.cp-section-left h3 { margin: 0; font-size: 1em; font-weight: 500; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
-            + '.cp-section-count { color: #999; font-size: 0.8em; flex-shrink: 0; }'
-            + '.cp-section-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }'
-            + '.cp-section-play { background: none; border: 1px solid #444; color: #999; width: 26px; height: 26px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.65em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
-            + '.cp-section-play:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
-            + '.cp-section-arrow { color: #666; transition: transform 0.2s; display: inline-block; }'
-            + '.cp-section-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
-            // Section progress bar
-            + '.cp-section-pbar-wrap { margin: 0 14px; }'
-            + '.cp-section-pbar { background: #333; border-radius: 2px; height: 3px; overflow: hidden; margin-bottom: 4px; }'
-            + '.cp-section-pfill { height: 100%; border-radius: 2px; transition: width 0.3s; }'
-            + '.cp-section-pfill.cp-sec-active { background: #00a4dc; }'
-            + '.cp-section-pfill.cp-sec-done { background: #4caf50; }'
-            // Lessons
-            + '.cp-lessons { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; padding: 0 14px; }'
-            + '.cp-lessons.open { max-height: 5000px; padding: 0 14px 8px; }'
-            + '.cp-lesson { display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #252525; gap: 8px; transition: background 0.15s; border-radius: 3px; }'
-            + '.cp-lesson:last-child { border-bottom: none; }'
-            + '.cp-lesson:hover { background: rgba(255,255,255,0.03); }'
-            // Up next highlight
-            + '.cp-lesson.cp-lesson-next { background: rgba(0,164,220,0.08); border-left: 3px solid #00a4dc; padding-left: 5px; margin-left: -3px; }'
-            + '.cp-lesson.cp-lesson-next .cp-lesson-status { color: #00a4dc; }'
-            + '.cp-next-badge { background: #00a4dc; color: #fff; font-size: 0.6em; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }'
-            // Lesson details
-            + '.cp-lesson-status { width: 18px; text-align: center; flex-shrink: 0; cursor: pointer; }'
-            + '.cp-lesson-status.played { color: #4caf50; }'
-            + '.cp-lesson-status.unplayed { color: #555; }'
-            + '.cp-lesson-name { flex: 1; min-width: 0; }'
-            + '.cp-lesson-name a { color: #ddd; text-decoration: none; }'
-            + '.cp-lesson-name a:hover { color: #00a4dc; }'
-            + '.cp-lesson-dur { color: #777; font-size: 0.8em; flex-shrink: 0; }'
-            + '</style>';
-
-        html += '<div class="cp-progress-header">'
-            + '<button class="cp-continue-btn" id="cpContinueBtn">'
-            + (completed >= total && total > 0 ? 'Replay Course' : 'Continue Course')
-            + '</button>'
-            + '<span class="cp-progress-text">' + completed + ' / ' + total + ' lessons</span>'
-            + '<div class="cp-progress-bar"><div class="cp-progress-fill' + (pct >= 100 ? ' cp-complete' : '') + '" style="width:' + pct + '%"></div></div>'
-            + '</div>';
-
-        var foundNext = false;
-
-        for (var i = 0; i < sections.length; i++) {
-            var sec = sections[i];
-            var sName = g(sec, 'Name');
-            var sLessons = g(sec, 'Lessons') || [];
-            var sCompleted = g(sec, 'CompletedCount') || 0;
-            var sTotal = g(sec, 'TotalCount') || 0;
-
-            var sPct = sTotal > 0 ? Math.round(sCompleted * 100 / sTotal) : 0;
-            var secDone = sCompleted >= sTotal && sTotal > 0;
-
-            html += '<div class="cp-section">'
-                + '<div class="cp-section-hdr" data-cpidx="' + i + '">'
-                + '<div class="cp-section-left">'
-                + '<h3>' + esc(sName) + '</h3>'
-                + '<span class="cp-section-count">' + sCompleted + '/' + sTotal + '</span>'
-                + '</div>'
-                + '<div class="cp-section-right">'
-                + '<button class="cp-section-play" data-cp-section="' + i + '" title="Play section">&#9654;</button>'
-                + '<span class="cp-section-arrow">&#9654;</span>'
-                + '</div>'
-                + '</div>'
-                + '<div class="cp-section-pbar-wrap"><div class="cp-section-pbar">'
-                + '<div class="cp-section-pfill ' + (secDone ? 'cp-sec-done' : 'cp-sec-active') + '" style="width:' + sPct + '%"></div>'
-                + '</div></div>'
-                + '<div class="cp-lessons" data-cpidx="' + i + '">';
-
-            for (var j = 0; j < sLessons.length; j++) {
-                var l = sLessons[j];
-                var lId = g(l, 'Id');
-                var lName = g(l, 'Name');
-                var played = g(l, 'Played');
-                var rt = g(l, 'RunTimeTicks') || 0;
-                var isNext = !played && !foundNext;
-                if (isNext) foundNext = true;
-
-                html += '<div class="cp-lesson' + (isNext ? ' cp-lesson-next' : '') + '">'
-                    + '<div class="cp-lesson-status ' + (played ? 'played' : 'unplayed')
-                    + '" data-cp-toggle="' + lId + '" data-cp-played="' + (played ? '1' : '0')
-                    + '" title="' + (played ? 'Mark unwatched' : 'Mark watched') + '">'
-                    + (played ? '&#10003;' : '&#9675;') + '</div>'
-                    + '<div class="cp-lesson-name"><a href="#!/details?id=' + lId + '">' + esc(lName) + '</a></div>'
-                    + (isNext ? '<span class="cp-next-badge">UP NEXT</span>' : '')
-                    + '<div class="cp-lesson-dur">' + formatDuration(rt) + '</div>'
-                    + '</div>';
-            }
-
-            html += '</div></div>';
+        var itemId = item.Id || item.id;
+        if (lessonCourseCache[itemId]) {
+            return Promise.resolve(lessonCourseCache[itemId]);
         }
-
-        container.innerHTML = html;
-        target.parentNode.insertBefore(container, target);
-
-        // Toggle sections.
-        container.querySelectorAll('.cp-section-hdr').forEach(function (hdr) {
-            hdr.addEventListener('click', function () {
-                var idx = this.getAttribute('data-cpidx');
-                var lessons = container.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
-                lessons.classList.toggle('open');
-                this.classList.toggle('open');
-            });
-        });
-
-        // Section play buttons.
-        container.querySelectorAll('.cp-section-play').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var idx = parseInt(this.getAttribute('data-cp-section'));
-                var sec = sections[idx];
-                var lessons = g(sec, 'Lessons') || [];
-                var ids = lessons.map(function (l) { return g(l, 'Id'); });
-                playItems(ids);
-            });
-        });
-
-        // Toggle watched/unwatched status (optimistic client-side update).
-        container.querySelectorAll('.cp-lesson-status[data-cp-toggle]').forEach(function (el) {
-            el.addEventListener('click', function (e) {
-                e.stopPropagation();
-                togglePlayed(this, container, sections);
-            });
-        });
-
-        // Auto-open first uncompleted section.
-        for (var k = 0; k < sections.length; k++) {
-            if ((g(sections[k], 'CompletedCount') || 0) < (g(sections[k], 'TotalCount') || 0)) {
-                var hdr = container.querySelector('.cp-section-hdr[data-cpidx="' + k + '"]');
-                if (hdr) hdr.click();
-                break;
-            }
-        }
-
-        // Continue / Replay: queue all lessons from the continue point onward.
-        var btn = document.getElementById('cpContinueBtn');
-        if (btn) {
-            btn.addEventListener('click', function () {
-                var ids = (completed >= total && total > 0)
-                    ? getAllLessonIds(sections)
-                    : getLessonIdsFromContinue(sections);
-                playItems(ids);
+        function walkUp(id) {
+            return apiFetch('/Items/' + id + '?Fields=Path,ParentId').then(function(parent) {
+                if (!parent) return null;
+                var parentPath = (parent.Path || '').replace(/\/+$/, '');
+                if (!parentPath) return null;
+                if ((parent.IsFolder || parent.isFolder) && isCourseItem(parent)) {
+                    var parentParentId = parent.ParentId || parent.parentId;
+                    if (!parentParentId) {
+                        lessonCourseCache[itemId] = parent.Id || parent.id;
+                        return parent.Id || parent.id;
+                    }
+                    return apiFetch('/Items/' + parentParentId + '?Fields=Path').then(function(gp) {
+                        if (!gp) {
+                            lessonCourseCache[itemId] = parent.Id || parent.id;
+                            return parent.Id || parent.id;
+                        }
+                        var gpPath = (gp.Path || '').replace(/\/+$/, '');
+                        if (COURSE_PATHS && COURSE_PATHS.length) {
+                            for (var i = 0; i < COURSE_PATHS.length; i++) {
+                                var cp = (COURSE_PATHS[i] || '').replace(/\/+$/, '');
+                                if (gpPath === cp) {
+                                    lessonCourseCache[itemId] = parent.Id || parent.id;
+                                    return parent.Id || parent.id;
+                                }
+                            }
+                        }
+                        return walkUp(parent.Id || parent.id);
+                    });
+                }
+                return null;
             });
         }
-    }
-
-    function cleanup() {
-        var el = document.querySelector('.courses-plugin-overview');
-        if (el) el.remove();
+        var parentId = item.ParentId || item.parentId;
+        if (!parentId) return Promise.resolve(null);
+        return walkUp(parentId);
     }
 
     function init() {
         injectStyles();
         createSidebar();
         var lastUrl = '';
-        var activeObserver = null;
-
-        // Allow playItems to invalidate the cached URL so the overview
-        // re-fetches with fresh progress data after playback.
-        invalidateOverview = function () { lastUrl = ''; };
-
-        // Wait for the SPA page transition to settle, then inject.
-        // Uses a short delay + MutationObserver to avoid racing with Jellyfin's router.
-        function waitAndInjectGeneric(itemId, checkSelector, injectFn) {
-            if (document.querySelector(checkSelector)) return;
-            if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
-
-            function tryInject() {
-                if (document.querySelector(checkSelector)) return true;
-                var t = document.querySelector('.page:not(.hide) .itemsContainer')
-                    || document.querySelector('.page:not(.hide) .padded-left')
-                    || document.querySelector('.detailPageContent');
-                if (t) { injectFn(itemId); return true; }
-                return false;
-            }
-
-            // Try immediately first.
-            if (tryInject()) return;
-
-            // Not ready yet — observe until it appears.
-            var root = document.querySelector('#reactRoot') || document.body;
-            activeObserver = new MutationObserver(function () {
-                if (tryInject()) {
-                    activeObserver.disconnect();
-                    activeObserver = null;
-                }
-            });
-            activeObserver.observe(root, { childList: true, subtree: true });
-
-            // Safety: disconnect after 10s.
-            setTimeout(function () {
-                if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
-            }, 10000);
-        }
+        invalidateOverview = function() { lastUrl = ''; };
 
         function onPageChange() {
             var url = window.location.hash;
             if (url === lastUrl) return;
             lastUrl = url;
-            cleanup();
-            if (activeObserver) {
-                activeObserver.disconnect();
-                activeObserver = null;
-            }
-
             var itemId = getItemIdFromUrl();
-            if (!itemId) return;
-            if (!COURSE_PATHS || !COURSE_PATHS.length) return;
-
-            apiFetch('/Items/' + itemId + '?Fields=Path').then(function (item) {
-                if (!item) return;
-                var isFolder = item.IsFolder || item.isFolder;
-                if (!isFolder) return;
-
-                if (isCourseItem(item)) {
-                    waitAndInjectGeneric(itemId, '.courses-plugin-overview', injectCourseOverview);
-                }
-            }).catch(function () { });
+            if (!itemId || !COURSE_PATHS || !COURSE_PATHS.length) {
+                hideSidebar();
+                return;
+            }
+            apiFetch('/Items/' + itemId + '?Fields=Path,ParentId').then(function(item) {
+                if (!item) { hideSidebar(); return; }
+                findCourseIdForItem(item).then(function(courseId) {
+                    if (!courseId) { hideSidebar(); return; }
+                    var auth = getAuth();
+                    if (!auth) { hideSidebar(); return; }
+                    apiFetch('/Courses/' + courseId + '/Structure?userId=' + auth.userId + '&_t=' + Date.now())
+                        .then(function(data) {
+                            if (!data) { hideSidebar(); return; }
+                            if (getSidebarOpen()) {
+                                expandSidebar();
+                                renderSidebarContent(data, courseId);
+                            } else {
+                                lastCourseData = data;
+                                lastCourseId = courseId;
+                                lastProgressPct = g(data, 'ProgressPercent') || 0;
+                                collapseSidebar();
+                            }
+                        })
+                        .catch(function() { hideSidebar(); });
+                }).catch(function() { hideSidebar(); });
+            }).catch(function() { hideSidebar(); });
         }
 
-        // Refresh overview when returning from playback (tab becomes visible again,
-        // or player overlay closes and React re-renders).
-        document.addEventListener('visibilitychange', function () {
+        document.addEventListener('visibilitychange', function() {
             if (!document.hidden) onPageChange();
         });
-
-        // Listen for all forms of URL change:
-        // - hashchange: direct hash changes
-        // - popstate: back/forward navigation
-        // - pushState/replaceState: SPA navigation (React Router)
         window.addEventListener('hashchange', onPageChange);
         window.addEventListener('popstate', onPageChange);
-
-        // Monkey-patch pushState/replaceState to detect SPA navigation.
         var origPush = history.pushState;
         var origReplace = history.replaceState;
-        history.pushState = function () {
+        history.pushState = function() {
             origPush.apply(this, arguments);
             onPageChange();
         };
-        history.replaceState = function () {
+        history.replaceState = function() {
             origReplace.apply(this, arguments);
             onPageChange();
         };
-
         onPageChange();
     }
 
