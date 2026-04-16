@@ -6,6 +6,15 @@
         "overview": "Course browser with progress tracking and collapsible sidebar",
         "owner": "vuongdt23",
         "category": "General",
-        "versions": []
+        "versions": [
+            {
+                "version": "1.0.0.0",
+                "changelog": "Initial release with collapsible sidebar, progress tracking, and one-click playback",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/vuongdt23/jelly-courses/releases/download/v1.0.0.0/Jellyfin.Plugin.Courses.zip",
+                "checksum": "73d7fdc57dd59ef94e5b78cba21392fb",
+                "timestamp": "2026-04-16T10:29:00Z"
+            }
+        ]
     }
 ]
