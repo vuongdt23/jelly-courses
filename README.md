@@ -14,6 +14,7 @@ A Jellyfin plugin for browsing and tracking progress through downloaded educatio
 ## Requirements
 
 - Jellyfin Server **10.11.x**
+- [File Transformation](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation) plugin (recommended) -- enables non-destructive script injection into the Jellyfin web UI without modifying files on disk. Without it, the plugin falls back to directly editing `index.html`, which may fail on read-only installs (e.g., systemd packages).
 - .NET SDK **9.0** (for building)
 - Docker (for local development)
 
@@ -27,17 +28,18 @@ A Jellyfin plugin for browsing and tracking progress through downloaded educatio
    https://raw.githubusercontent.com/vuongdt23/jelly-courses/main/manifest.json
    ```
 3. Go to **Catalog**, find **Courses**, and install it
-4. Restart Jellyfin
-5. Create a library using the **Mixed Content** type pointed at your courses folder
-6. Go to **Dashboard > Plugins > Courses** and add your library path to **Course Library Paths**
-7. Scan the library
+4. Also install the **File Transformation** plugin from the catalog (or [manually](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation/releases))
+5. Restart Jellyfin
+6. Create a library using the **Home Videos & Photos** type pointed at your courses folder
+7. Go to **Dashboard > Plugins > Courses** and add your library path to **Course Library Paths**
+8. Scan the library
 
 ### Manual Install
 
 1. Download the latest `Jellyfin.Plugin.Courses.zip` from [Releases](https://github.com/vuongdt23/jelly-courses/releases)
 2. Extract the DLL to your Jellyfin plugins directory (e.g., `config/plugins/Courses/`)
 3. Restart Jellyfin
-4. Follow steps 5-7 above
+4. Follow steps 6-8 above
 
 ## Folder Structure
 
@@ -106,7 +108,7 @@ Starts Jellyfin at http://localhost:8096 with config in `./jellyfin/` and test m
 **2. First-Time Setup**
 
 1. Open http://localhost:8096 and complete the setup wizard
-2. Create a library: **Mixed Content** type, pointed at `/media/test-courses`
+2. Create a library: **Home Videos & Photos** type, pointed at `/media/test-courses`
 3. Deploy the plugin (step 3), then go to **Dashboard > Plugins > Courses** and add `/media/test-courses` to **Course Library Paths**
 4. Scan the library
 
@@ -142,7 +144,7 @@ Then add `/media/courses` to the plugin's Course Library Paths setting.
 
 ### How the Frontend Works
 
-1. `ScriptInjectionTask` runs at Jellyfin startup and injects `<script src="/Courses/client.js">` into `index.html`
+1. `ScriptInjectionTask` runs at Jellyfin startup. If the [File Transformation](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation) plugin is installed, it registers an in-memory HTML transformation via reflection (`ScriptInjectionPatch`). Otherwise, it falls back to directly writing a `<script>` tag into `index.html` on disk.
 2. `CoursesController` serves `client.js` from embedded resources, replacing the `COURSE_PATHS` placeholder with configured library paths at serve time
 3. `client.js` monitors URL changes and renders a collapsible sidebar when the user navigates to course content
 
