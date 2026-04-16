@@ -25,4 +25,9 @@
     <EmbeddedResource Include="Web\**\*" />
   </ItemGroup>
 
+  <Target Name="DeployToJellyfin" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)/../jellyfin/config/plugins/Courses')">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(MSBuildProjectDirectory)/../jellyfin/config/plugins/Courses/" />
+    <Message Importance="high" Text="Deployed to jellyfin/config/plugins/Courses/" />
+  </Target>
+
 </Project>
