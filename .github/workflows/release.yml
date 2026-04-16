@@ -1,0 +1,68 @@
+name: Release Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.Courses -c Release --nologo
+
+      - name: Create zip
+        run: |
+          cd Jellyfin.Plugin.Courses/bin/Release/net9.0
+          zip -j "$GITHUB_WORKSPACE/Jellyfin.Plugin.Courses.zip" Jellyfin.Plugin.Courses.dll
+
+      - name: Compute checksum
+        id: checksum
+        run: echo "md5=$(md5sum Jellyfin.Plugin.Courses.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Jellyfin.Plugin.Courses.zip
+          generate_release_notes: true
+
+      - name: Update manifest.json
+        run: |
+          jq --arg ver "${{ steps.version.outputs.version }}" \
+             --arg url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Jellyfin.Plugin.Courses.zip" \
+             --arg md5 "${{ steps.checksum.outputs.md5 }}" \
+             --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             '.[0].versions = [{
+                version: $ver,
+                changelog: "See release notes on GitHub",
+                targetAbi: "10.11.0.0",
+                sourceUrl: $url,
+                checksum: $md5,
+                timestamp: $ts
+              }] + .[0].versions' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add manifest.json
+          git commit -m "chore: update manifest for ${{ github.ref_name }}"
+          git push origin main

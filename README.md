@@ -19,15 +19,25 @@ A Jellyfin plugin for browsing and tracking progress through downloaded educatio
 
 ## Installation
 
-1. Build the plugin:
-   ```bash
-   dotnet build Jellyfin.Plugin.Courses
+### From Plugin Repository (Recommended)
+
+1. In Jellyfin, go to **Dashboard > Plugins > Repositories**
+2. Add a new repository with this URL:
    ```
-2. Copy `bin/Debug/net9.0/Jellyfin.Plugin.Courses.dll` to your Jellyfin plugins directory (e.g., `config/plugins/Courses/`)
+   https://raw.githubusercontent.com/vuongdt23/jelly-courses/main/manifest.json
+   ```
+3. Go to **Catalog**, find **Courses**, and install it
+4. Restart Jellyfin
+5. Create a library using the **Mixed Content** type pointed at your courses folder
+6. Go to **Dashboard > Plugins > Courses** and add your library path to **Course Library Paths**
+7. Scan the library
+
+### Manual Install
+
+1. Download the latest `Jellyfin.Plugin.Courses.zip` from [Releases](https://github.com/vuongdt23/jelly-courses/releases)
+2. Extract the DLL to your Jellyfin plugins directory (e.g., `config/plugins/Courses/`)
 3. Restart Jellyfin
-4. Create a library using the **Mixed Content** type pointed at your courses folder
-5. Go to **Dashboard > Plugins > Courses** and add your library path to **Course Library Paths**
-6. Scan the library
+4. Follow steps 5-7 above
 
 ## Folder Structure
 

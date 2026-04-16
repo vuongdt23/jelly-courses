@@ -1,0 +1,11 @@
+[
+    {
+        "guid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "Courses",
+        "description": "Browse and track progress through downloaded educational courses with a collapsible sidebar, progress tracking, and one-click playback.",
+        "overview": "Course browser with progress tracking and collapsible sidebar",
+        "owner": "vuongdt23",
+        "category": "General",
+        "versions": []
+    }
+]
