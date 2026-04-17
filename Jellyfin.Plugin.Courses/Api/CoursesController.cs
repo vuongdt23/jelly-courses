@@ -333,6 +333,8 @@ public class SectionDto
     public int CompletedCount { get; set; }
 
     public int TotalCount { get; set; }
+
+    public List<ResourceFileDto> Resources { get; set; } = [];
 }
 
 public class CourseStructureDto
@@ -348,4 +350,26 @@ public class CourseStructureDto
     public int CompletedLessons { get; set; }
 
     public int ProgressPercent { get; set; }
+
+    public List<ResourceFolderDto> ResourceFolders { get; set; } = [];
+}
+
+public class ResourceFileDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
+    public string Extension { get; set; } = string.Empty;
+
+    public long Size { get; set; }
+}
+
+public class ResourceFolderDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
+    public List<ResourceFileDto> Files { get; set; } = [];
 }
