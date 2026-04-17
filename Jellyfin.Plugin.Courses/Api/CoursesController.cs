@@ -11,6 +11,21 @@ namespace Jellyfin.Plugin.Courses.Api;
 [Route("Courses")]
 public class CoursesController : ControllerBase
 {
+    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
+    };
+
+    private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".url", ".ini", ".nfo", ".html", ".htm"
+    };
+
+    private static readonly HashSet<string> _junkFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "desktop.ini", ".ds_store", "thumbs.db"
+    };
+
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
@@ -177,6 +192,10 @@ public class CoursesController : ControllerBase
             }
             else
             {
+                // Find the subfolder path for section-level resource scanning.
+                var sectionPath = Path.GetDirectoryName(group.First().Video.Path) ?? string.Empty;
+                var sectionResources = ScanResourceFiles(sectionPath, folder.Path);
+
                 sections.Add(new SectionDto
                 {
                     Id = group.Key.Value,
@@ -185,6 +204,7 @@ public class CoursesController : ControllerBase
                     Lessons = lessons,
                     CompletedCount = lessons.Count(l => l.Played),
                     TotalCount = lessons.Count,
+                    Resources = sectionResources,
                 });
             }
         }
@@ -200,11 +220,14 @@ public class CoursesController : ControllerBase
                 Lessons = flatLessons,
                 CompletedCount = flatLessons.Count(l => l.Played),
                 TotalCount = flatLessons.Count,
+                Resources = ScanResourceFiles(folder.Path, folder.Path),
             });
         }
 
         var totalLessons = sections.Sum(s => s.TotalCount);
         var completedLessons = sections.Sum(s => s.CompletedCount);
+
+        var resourceFolders = ScanResourceFolders(folder.Path);
 
         return Ok(new CourseStructureDto
         {
@@ -214,6 +237,7 @@ public class CoursesController : ControllerBase
             TotalLessons = totalLessons,
             CompletedLessons = completedLessons,
             ProgressPercent = totalLessons > 0 ? (int)(completedLessons * 100.0 / totalLessons) : 0,
+            ResourceFolders = resourceFolders,
         });
     }
 
@@ -293,6 +317,100 @@ public class CoursesController : ControllerBase
             .Cast<Video>()
             .OrderBy(l => l.SortName)
             .ToArray();
+    }
+
+    private static List<ResourceFileDto> ScanResourceFiles(string directoryPath, string basePath)
+    {
+        var resources = new List<ResourceFileDto>();
+        if (!Directory.Exists(directoryPath))
+        {
+            return resources;
+        }
+
+        try
+        {
+            foreach (var filePath in Directory.EnumerateFiles(directoryPath))
+            {
+                var fileName = Path.GetFileName(filePath);
+                var ext = Path.GetExtension(filePath);
+
+                if (_junkFileNames.Contains(fileName) || _junkExtensions.Contains(ext))
+                {
+                    continue;
+                }
+
+                if (_videoExtensions.Contains(ext))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(basePath, filePath).Replace('\\', '/');
+                resources.Add(new ResourceFileDto
+                {
+                    Name = fileName,
+                    RelativePath = relativePath,
+                    Extension = ext.ToLowerInvariant(),
+                    Size = new FileInfo(filePath).Length,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // Permission errors or race conditions — return what we have.
+        }
+
+        return resources.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<ResourceFolderDto> ScanResourceFolders(string courseRootPath)
+    {
+        var folders = new List<ResourceFolderDto>();
+        if (!Directory.Exists(courseRootPath))
+        {
+            return folders;
+        }
+
+        try
+        {
+            foreach (var dirPath in Directory.EnumerateDirectories(courseRootPath))
+            {
+                var dirName = Path.GetFileName(dirPath);
+
+                // Skip junk folders (starting with "0.").
+                if (dirName.StartsWith("0.", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // A resource folder has zero video files.
+                var hasVideo = Directory.EnumerateFiles(dirPath)
+                    .Any(f => _videoExtensions.Contains(Path.GetExtension(f)));
+                if (hasVideo)
+                {
+                    continue;
+                }
+
+                var files = ScanResourceFiles(dirPath, courseRootPath);
+                if (files.Count == 0)
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(courseRootPath, dirPath).Replace('\\', '/');
+                folders.Add(new ResourceFolderDto
+                {
+                    Name = dirName,
+                    RelativePath = relativePath,
+                    Files = files,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // Permission errors or race conditions — return what we have.
+        }
+
+        return folders.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
 
