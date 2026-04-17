@@ -454,7 +454,7 @@
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 var zipPath = this.getAttribute('data-cp-zip-path');
-                window.open('/Courses/' + courseId + '/Resources?path=' + encodeURIComponent(zipPath) + '&zip=true');
+                window.open(resourceUrl(courseId, zipPath, '&zip=true'));
             });
         });
 
@@ -509,6 +509,14 @@
             }
         } catch (e) { }
         return null;
+    }
+
+    function resourceUrl(courseId, path, extra) {
+        var auth = getAuth();
+        var url = '/Courses/' + courseId + '/Resources?path=' + encodeURIComponent(path);
+        if (extra) url += extra;
+        if (auth) url += '&api_key=' + auth.token;
+        return url;
     }
 
     function apiFetch(path) {
@@ -734,7 +742,7 @@
         var title = modal.querySelector('.cp-preview-title');
         var dlBtn = modal.querySelector('.cp-preview-dl');
         var fileName = path.split('/').pop();
-        var fileUrl = '/Courses/' + courseId + '/Resources?path=' + encodeURIComponent(path);
+        var fileUrl = resourceUrl(courseId, path);
 
         title.textContent = fileName;
         dlBtn.onclick = function () { window.open(fileUrl + '&download=true'); };
