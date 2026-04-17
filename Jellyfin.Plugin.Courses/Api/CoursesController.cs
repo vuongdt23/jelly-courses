@@ -3,6 +3,7 @@ using System.Reflection;
 using Jellyfin.Database.Implementations;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Courses.Api;
 
 [Route("Courses")]
+[Authorize]
 public class CoursesController : ControllerBase
 {
     private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -50,6 +52,7 @@ public class CoursesController : ControllerBase
     [HttpGet("client.js")]
     [Produces("application/javascript")]
     [ResponseCache(NoStore = true)]
+    [AllowAnonymous]
     public ActionResult GetClientScript()
     {
         var stream = Assembly.GetExecutingAssembly()
