@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Reflection;
 using Jellyfin.Database.Implementations;
 using MediaBrowser.Controller.Entities;
@@ -260,6 +261,81 @@ public class CoursesController : ControllerBase
         return Content(html, "text/html");
     }
 
+    [HttpGet("{courseId}/Resources")]
+    public ActionResult GetResource(
+        [FromRoute] Guid courseId,
+        [FromQuery] string path,
+        [FromQuery] bool download = false,
+        [FromQuery] bool zip = false)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return BadRequest("path is required.");
+        }
+
+        // Reject path traversal attempts early.
+        if (path.Contains("..", StringComparison.Ordinal))
+        {
+            return BadRequest("Invalid path.");
+        }
+
+        var item = _libraryManager.GetItemById(courseId);
+        if (item is not Folder folder || !IsCoursePath(folder.Path))
+        {
+            return NotFound("Course not found.");
+        }
+
+        var courseRoot = folder.Path;
+        var fullPath = Path.GetFullPath(Path.Combine(courseRoot, path));
+
+        // Verify the resolved path is under the course root.
+        if (!fullPath.StartsWith(courseRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Invalid path.");
+        }
+
+        // Directory → zip download.
+        if (Directory.Exists(fullPath))
+        {
+            if (!zip)
+            {
+                return BadRequest("Use zip=true for directory downloads.");
+            }
+
+            var folderName = Path.GetFileName(fullPath);
+            Response.Headers.ContentDisposition = $"attachment; filename=\"{folderName}.zip\"";
+            return new FileCallbackResult("application/zip", (stream, _) =>
+            {
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var file in Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories))
+                {
+                    var entryName = Path.GetRelativePath(fullPath, file).Replace('\\', '/');
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    using var entryStream = entry.Open();
+                    using var fileStream = System.IO.File.OpenRead(file);
+                    fileStream.CopyTo(entryStream);
+                }
+                return Task.CompletedTask;
+            });
+        }
+
+        // File → serve directly.
+        if (!System.IO.File.Exists(fullPath))
+        {
+            return NotFound("File not found.");
+        }
+
+        var contentType = GetContentType(Path.GetExtension(fullPath));
+        var fileName = Path.GetFileName(fullPath);
+
+        if (download)
+        {
+            return PhysicalFile(fullPath, contentType, fileName);
+        }
+
+        return PhysicalFile(fullPath, contentType);
+    }
+
     private static bool IsCoursePath(string? path)
     {
         if (string.IsNullOrEmpty(path))
@@ -317,6 +393,30 @@ public class CoursesController : ControllerBase
             .Cast<Video>()
             .OrderBy(l => l.SortName)
             .ToArray();
+    }
+
+    private static string GetContentType(string extension)
+    {
+        return extension.ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".py" or ".js" or ".ts" or ".java" or ".cs" or ".sh" or ".rb" or ".go" or ".rs"
+                or ".c" or ".cpp" or ".h" or ".css" or ".xml" or ".sql" => "text/plain",
+            ".json" => "application/json",
+            ".yml" or ".yaml" => "text/yaml",
+            ".zip" => "application/zip",
+            ".tar" => "application/x-tar",
+            ".gz" => "application/gzip",
+            ".rar" => "application/vnd.rar",
+            ".7z" => "application/x-7z-compressed",
+            _ => "application/octet-stream",
+        };
     }
 
     private static List<ResourceFileDto> ScanResourceFiles(string directoryPath, string basePath)
@@ -490,4 +590,23 @@ public class ResourceFolderDto
     public string RelativePath { get; set; } = string.Empty;
 
     public List<ResourceFileDto> Files { get; set; } = [];
+}
+
+public class FileCallbackResult : ActionResult
+{
+    private readonly string _contentType;
+    private readonly Func<Stream, CancellationToken, Task> _callback;
+
+    public FileCallbackResult(string contentType, Func<Stream, CancellationToken, Task> callback)
+    {
+        _contentType = contentType;
+        _callback = callback;
+    }
+
+    public override async Task ExecuteResultAsync(ActionContext context)
+    {
+        var response = context.HttpContext.Response;
+        response.ContentType = _contentType;
+        await _callback(response.Body, context.HttpContext.RequestAborted);
+    }
 }

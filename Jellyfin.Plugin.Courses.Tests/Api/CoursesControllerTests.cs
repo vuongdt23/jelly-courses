@@ -248,4 +248,37 @@ public class CoursesControllerTests
         var dto = new CourseStructureDto();
         Assert.Empty(dto.ResourceFolders);
     }
+
+    // --- GetResource ---
+
+    [Fact]
+    public void GetResource_CourseNotFound_ReturnsNotFound()
+    {
+        var courseId = Guid.NewGuid();
+        _libraryManager.Setup(x => x.GetItemById(courseId)).Returns((BaseItem?)null);
+
+        var result = _controller.GetResource(courseId, "notes.pdf");
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public void GetResource_MissingPath_ReturnsBadRequest()
+    {
+        var courseId = Guid.NewGuid();
+
+        var result = _controller.GetResource(courseId, "");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public void GetResource_PathTraversal_ReturnsBadRequest()
+    {
+        var courseId = Guid.NewGuid();
+
+        var result = _controller.GetResource(courseId, "../../../etc/passwd");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
 }
