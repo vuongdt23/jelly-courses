@@ -407,7 +407,8 @@ public class CoursesController : ControllerBase
             ".webp" => "image/webp",
             ".bmp" => "image/bmp",
             ".py" or ".js" or ".ts" or ".java" or ".cs" or ".sh" or ".rb" or ".go" or ".rs"
-                or ".c" or ".cpp" or ".h" or ".css" or ".xml" or ".sql" => "text/plain",
+                or ".c" or ".cpp" or ".h" or ".css" or ".xml" or ".sql"
+                or ".md" or ".markdown" or ".txt" => "text/plain",
             ".json" => "application/json",
             ".yml" or ".yaml" => "text/yaml",
             ".zip" => "application/zip",
@@ -607,6 +608,13 @@ public class FileCallbackResult : ActionResult
     {
         var response = context.HttpContext.Response;
         response.ContentType = _contentType;
+        // ZipArchive uses synchronous writes internally.
+        var syncIoFeature = context.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature>();
+        if (syncIoFeature != null)
+        {
+            syncIoFeature.AllowSynchronousIO = true;
+        }
+
         await _callback(response.Body, context.HttpContext.RequestAborted);
     }
 }

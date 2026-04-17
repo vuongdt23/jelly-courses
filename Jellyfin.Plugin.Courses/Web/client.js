@@ -604,9 +604,9 @@
         ext = (ext || '').toLowerCase();
         if (ext === '.pdf') return '\ud83d\udcc4';
         if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) return '\ud83d\uddbc';
-        if (['.py','.js','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.ts','.c','.cpp','.h'].indexOf(ext) >= 0) return '\ud83d\udcbb';
+        if (['.py','.js','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.ts','.c','.cpp','.h','.md','.markdown','.txt'].indexOf(ext) >= 0) return '\ud83d\udcbb';
         if (['.zip','.tar','.gz','.rar','.7z'].indexOf(ext) >= 0) return '\ud83d\udce6';
-        return '\ud83d\udcc1';
+        return '\ud83d\udcc4';
     }
 
     function formatSize(bytes) {
@@ -747,7 +747,7 @@
             previewPdf(body, fileUrl);
         } else if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) {
             previewImage(body, fileUrl);
-        } else if (['.py','.js','.ts','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.c','.cpp','.h'].indexOf(ext) >= 0) {
+        } else if (['.py','.js','.ts','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.c','.cpp','.h','.md','.markdown','.txt'].indexOf(ext) >= 0) {
             previewCode(body, fileUrl, ext);
         } else {
             body.innerHTML = '<div style="color:#888;padding:60px;text-align:center;">'
