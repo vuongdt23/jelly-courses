@@ -137,7 +137,6 @@ public class CourseResolverTests
     [InlineData(".wmv")]
     [InlineData(".flv")]
     [InlineData(".m4v")]
-    [InlineData(".ts")]
     public void ResolvePath_SupportedVideoExtensions_ReturnsCourseLesson(string ext)
     {
         var parent = new Course { Name = "Test" };
@@ -146,6 +145,63 @@ public class CourseResolverTests
         var result = _resolver.ResolvePath(args);
 
         Assert.IsType<CourseLesson>(result);
+    }
+
+    [Fact]
+    public void ResolvePath_MpegTsFile_ReturnsCourseLesson()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), "test-" + Guid.NewGuid() + ".ts");
+        try
+        {
+            // Write valid MPEG-TS header: 0x47 at byte 0 and byte 188
+            var data = new byte[376];
+            data[0] = 0x47;
+            data[188] = 0x47;
+            File.WriteAllBytes(tempFile, data);
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempFile, false, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.IsType<CourseLesson>(result);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_TypeScriptFile_ReturnsNull()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), "test-" + Guid.NewGuid() + ".ts");
+        try
+        {
+            File.WriteAllText(tempFile, "import { Component } from '@angular/core';");
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempFile, false, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.Null(result);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_NonexistentTsFile_ReturnsNull()
+    {
+        var parent = new Course { Name = "Test" };
+        var args = CreateArgs("/nonexistent/video.ts", false, parent);
+
+        var result = _resolver.ResolvePath(args);
+
+        Assert.Null(result);
     }
 
     [Theory]
