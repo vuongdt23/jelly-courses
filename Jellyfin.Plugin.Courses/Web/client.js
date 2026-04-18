@@ -26,12 +26,37 @@
         localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
     }
 
+    // Toggle a collapsible panel using scrollHeight for accurate animation.
+    function toggleCollapsible(el) {
+        if (!el) return;
+        if (el.classList.contains('open')) {
+            // Collapse: set max-height to current scrollHeight, then force reflow, then set to 0
+            el.style.maxHeight = el.scrollHeight + 'px';
+            // Force reflow so the browser registers the starting value
+            el.offsetHeight; // eslint-disable-line no-unused-expressions
+            el.style.maxHeight = '0';
+            el.classList.remove('open');
+        } else {
+            el.classList.add('open');
+            el.style.maxHeight = el.scrollHeight + 'px';
+            // After transition, remove max-height so dynamically added content isn't clipped
+            var onEnd = function () {
+                el.removeEventListener('transitionend', onEnd);
+                if (el.classList.contains('open')) {
+                    el.style.maxHeight = 'none';
+                }
+            };
+            el.addEventListener('transitionend', onEnd);
+        }
+    }
+
     // Module-level sidebar state
     var sidebarEl = null;
     var backdropEl = null;
     var lastCourseData = null;
     var lastCourseId = null;
     var lastProgressPct = 0;
+    var resourceCache = {};
 
     // DOM helpers
     function getHeaderHeight() {
@@ -127,6 +152,11 @@
 
     function renderSidebarContent(data, courseId) {
         if (!data || !sidebarEl) return;
+
+        // Clear resource cache when switching courses
+        if (courseId !== lastCourseId) {
+            resourceCache = {};
+        }
 
         lastCourseData = data;
         lastCourseId = courseId;
@@ -271,67 +301,15 @@
                     + '</div>';
             }
 
-            // Section-level resources (inside lessons so they collapse together)
-            var secResources = g(sec, 'Resources') || [];
-            if (secResources.length > 0) {
-                html += '<div class="cp-sec-resources" data-cpridx="' + i + '">'
-                    + '<div class="cp-sec-res-hdr" data-cpridx="' + i + '">'
-                    + '<span class="cp-res-icon"><i class="fa-solid fa-paperclip"></i></span>'
-                    + '<span class="cp-sec-res-label">Resources</span>'
-                    + '<span class="cp-section-count">' + secResources.length + ' files</span>'
-                    + '<span class="cp-section-arrow">\u25b6</span>'
-                    + '</div>';
-                html += '<div class="cp-res-files" data-cpridx="' + i + '">';
-                for (var ri = 0; ri < secResources.length; ri++) {
-                    var res = secResources[ri];
-                    var rName = g(res, 'Name') || '';
-                    var rPath = g(res, 'RelativePath') || '';
-                    var rExt = g(res, 'Extension') || '';
-                    var rSize = g(res, 'Size') || 0;
-                    html += '<div class="cp-res-file" data-cp-res-path="' + esc(rPath) + '" data-cp-res-ext="' + esc(rExt) + '">'
-                        + '<span class="cp-res-file-icon">' + getFileIcon(rExt) + '</span>'
-                        + '<span class="cp-res-file-name">' + esc(rName) + '</span>'
-                        + '<span class="cp-res-file-size">' + formatSize(rSize) + '</span>'
-                        + '</div>';
-                }
-                html += '</div></div>';
-            }
+            // Lazy resource placeholder (loaded on section expand)
+            html += '<div class="cp-sec-resources-lazy" data-cp-section-id="' + g(sec, 'Id') + '"></div>';
 
             html += '</div>'; // close .cp-lessons
             html += '</div>'; // close .cp-section
         }
 
-        // Resource folders (non-video subfolders)
-        var resourceFolders = g(data, 'ResourceFolders') || [];
-        for (var fi = 0; fi < resourceFolders.length; fi++) {
-            var rf = resourceFolders[fi];
-            var rfName = g(rf, 'Name') || '';
-            var rfPath = g(rf, 'RelativePath') || '';
-            var rfFiles = g(rf, 'Files') || [];
-
-            html += '<div class="cp-resource-folder">'
-                + '<div class="cp-res-folder-hdr" data-cpfidx="' + fi + '">'
-                + '<span class="cp-res-icon"><i class="fa-solid fa-folder-open"></i></span>'
-                + '<span class="cp-section-name">' + esc(rfName) + '</span>'
-                + '<span class="cp-section-count">' + rfFiles.length + ' files</span>'
-                + '<button class="cp-res-dl-all" data-cp-zip-path="' + esc(rfPath) + '" title="Download all as zip">\u2b07</button>'
-                + '<span class="cp-section-arrow">\u25b6</span>'
-                + '</div>';
-            html += '<div class="cp-res-folder-files" data-cpfidx="' + fi + '">';
-            for (var ffi = 0; ffi < rfFiles.length; ffi++) {
-                var f = rfFiles[ffi];
-                var fName = g(f, 'Name') || '';
-                var fPath = g(f, 'RelativePath') || '';
-                var fExt = g(f, 'Extension') || '';
-                var fSize = g(f, 'Size') || 0;
-                html += '<div class="cp-res-file" data-cp-res-path="' + esc(fPath) + '" data-cp-res-ext="' + esc(fExt) + '">'
-                    + '<span class="cp-res-file-icon">' + getFileIcon(fExt) + '</span>'
-                    + '<span class="cp-res-file-name">' + esc(fName) + '</span>'
-                    + '<span class="cp-res-file-size">' + formatSize(fSize) + '</span>'
-                    + '</div>';
-            }
-            html += '</div></div>';
-        }
+        // Course-level lazy resource placeholder
+        html += '<div class="cp-course-resources-lazy" data-cp-course-id="' + courseId + '"></div>';
 
         html += '</div>';
 
@@ -363,13 +341,23 @@
             });
         }
 
-        // 3. Section headers — toggle open/close
+        // 3. Section headers — toggle open/close + lazy resource load
         sidebarEl.querySelectorAll('.cp-section-hdr').forEach(function (hdr) {
             hdr.addEventListener('click', function (e) {
                 if (e.target.closest('.cp-section-play')) return;
                 var idx = this.getAttribute('data-cpidx');
                 var lessonsDiv = sidebarEl.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
-                if (lessonsDiv) lessonsDiv.classList.toggle('open');
+                if (lessonsDiv) {
+                    toggleCollapsible(lessonsDiv);
+                    // Lazy-load resources on first expand
+                    if (lessonsDiv.classList.contains('open')) {
+                        var placeholder = lessonsDiv.querySelector('.cp-sec-resources-lazy');
+                        if (placeholder) {
+                            var secId = placeholder.getAttribute('data-cp-section-id');
+                            loadResources(placeholder, secId, courseId);
+                        }
+                    }
+                }
                 this.classList.toggle('open');
             });
         });
@@ -427,44 +415,93 @@
             }
         }
 
-        // 8. Section resource headers — toggle open/close
-        sidebarEl.querySelectorAll('.cp-sec-res-hdr').forEach(function (hdr) {
-            hdr.addEventListener('click', function () {
-                var idx = this.getAttribute('data-cpridx');
-                var filesDiv = sidebarEl.querySelector('.cp-res-files[data-cpridx="' + idx + '"]');
-                if (filesDiv) filesDiv.classList.toggle('open');
-                this.classList.toggle('open');
+        // 8. Lazy-load resources when section is expanded
+        function loadResources(container, sectionId, cid) {
+            if (resourceCache[sectionId] === 'loading') return;
+            if (resourceCache[sectionId]) {
+                renderCachedResources(container, resourceCache[sectionId], sectionId, cid);
+                return;
+            }
+            resourceCache[sectionId] = 'loading';
+            container.innerHTML = '<div class="cp-res-loading" style="color:#555;font-size:0.8em;padding:6px 8px;"><i class="fa-solid fa-spinner fa-spin"></i> Loading resources\u2026</div>';
+            var url = '/Courses/' + cid + '/ResourceScan' + (sectionId !== cid ? '?sectionId=' + sectionId : '');
+            apiFetch(url).then(function (res) {
+                resourceCache[sectionId] = res;
+                renderCachedResources(container, res, sectionId, cid);
+            }).catch(function () {
+                container.innerHTML = '';
+                resourceCache[sectionId] = null;
             });
-        });
+        }
 
-        // 9. Resource folder headers — toggle open/close
-        sidebarEl.querySelectorAll('.cp-res-folder-hdr').forEach(function (hdr) {
-            hdr.addEventListener('click', function (e) {
-                if (e.target.closest('.cp-res-dl-all')) return;
-                var idx = this.getAttribute('data-cpfidx');
-                var filesDiv = sidebarEl.querySelector('.cp-res-folder-files[data-cpfidx="' + idx + '"]');
-                if (filesDiv) filesDiv.classList.toggle('open');
-                this.classList.toggle('open');
-            });
-        });
+        function renderCachedResources(container, res, sectionId, cid) {
+            var files = g(res, 'Files') || [];
+            var folders = g(res, 'Folders') || [];
+            if (files.length === 0 && folders.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            var fileCount = countResourceTree(files, folders);
+            var isCourse = sectionId === cid;
+            var hdrClass = isCourse ? 'cp-sec-res-hdr cp-course-res-hdr' : 'cp-sec-res-hdr';
+            var bodyClass = isCourse ? 'cp-res-root-body' : 'cp-res-files';
+            var html = '<div class="' + (isCourse ? 'cp-resource-root' : 'cp-sec-resources') + '">'
+                + '<div class="' + hdrClass + '">'
+                + '<span class="cp-res-icon"><i class="fa-solid fa-paperclip"></i></span>'
+                + '<span class="cp-sec-res-label">Resources</span>'
+                + '<span class="cp-section-count">' + fileCount + ' files</span>'
+                + '<span class="cp-section-arrow">\u25b6</span>'
+                + '</div>'
+                + '<div class="' + bodyClass + '">'
+                + renderResourceFiles(files)
+                + renderResourceFolders(folders)
+                + '</div></div>';
+            container.innerHTML = html;
+            wireResourceEvents(container, cid);
+        }
 
-        // 10. Download All (zip) buttons
-        sidebarEl.querySelectorAll('.cp-res-dl-all').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var zipPath = this.getAttribute('data-cp-zip-path');
-                window.open(resourceUrl(courseId, zipPath, '&zip=true'));
+        function wireResourceEvents(root, cid) {
+            // Resource headers toggle
+            root.querySelectorAll('.cp-sec-res-hdr').forEach(function (hdr) {
+                hdr.addEventListener('click', function () {
+                    var body = this.nextElementSibling;
+                    toggleCollapsible(body);
+                    this.classList.toggle('open');
+                });
             });
-        });
+            // Folder headers toggle
+            root.querySelectorAll('.cp-res-folder-hdr').forEach(function (hdr) {
+                hdr.addEventListener('click', function (e) {
+                    if (e.target.closest('.cp-res-dl-all')) return;
+                    var body = this.nextElementSibling;
+                    toggleCollapsible(body);
+                    this.classList.toggle('open');
+                });
+            });
+            // Download zip
+            root.querySelectorAll('.cp-res-dl-all').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var zipPath = this.getAttribute('data-cp-zip-path');
+                    window.open(resourceUrl(cid, zipPath, '&zip=true'));
+                });
+            });
+            // File click → preview
+            root.querySelectorAll('.cp-res-file').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    var resPath = this.getAttribute('data-cp-res-path');
+                    var resExt = this.getAttribute('data-cp-res-ext');
+                    var resName = this.getAttribute('data-cp-res-name');
+                    openResourcePreview(cid, resPath, resExt, resName);
+                });
+            });
+        }
 
-        // 11. Individual resource file clicks — open preview
-        sidebarEl.querySelectorAll('.cp-res-file').forEach(function (el) {
-            el.addEventListener('click', function () {
-                var resPath = this.getAttribute('data-cp-res-path');
-                var resExt = this.getAttribute('data-cp-res-ext');
-                openResourcePreview(courseId, resPath, resExt);
-            });
-        });
+        // 9. Lazy-load course-level resources after render
+        var coursePlaceholder = sidebarEl.querySelector('.cp-course-resources-lazy');
+        if (coursePlaceholder) {
+            loadResources(coursePlaceholder, courseId, courseId);
+        }
 
         // --- Resize handle logic ---
         var resizeHandle = document.getElementById('cpResizeHandle');
@@ -607,38 +644,99 @@
         return m + ':' + (s < 10 ? '0' : '') + s;
     }
 
-    function getFileIcon(ext) {
+    function getFileIcon(ext, name) {
         ext = (ext || '').toLowerCase();
+        name = (name || '').toLowerCase();
+        // Filename-based icons for extensionless files
+        var nameMap = {
+            'dockerfile': 'devicon-docker-plain colored',
+            'jenkinsfile': 'devicon-jenkins-plain colored',
+            'vagrantfile': 'devicon-vagrant-plain colored',
+            'makefile': 'devicon-cmake-plain colored',
+            'gnumakefile': 'devicon-cmake-plain colored',
+            'gemfile': 'devicon-ruby-plain colored',
+            'rakefile': 'devicon-ruby-plain colored'
+        };
+        if (!ext && nameMap[name]) return '<i class="' + nameMap[name] + ' cp-icon"></i>';
+        // Also match Dockerfile.* variants
+        if (!ext && (name === 'dockerfile' || name.indexOf('dockerfile.') === 0)) return '<i class="devicon-docker-plain colored cp-icon"></i>';
         // Devicon language-specific icons — 'colored' class provides brand colors
         var deviconMap = {
-            '.py': 'devicon-python-plain colored',
+            // JavaScript / TypeScript
             '.js': 'devicon-javascript-plain colored',
+            '.mjs': 'devicon-javascript-plain colored',
+            '.cjs': 'devicon-javascript-plain colored',
+            '.jsx': 'devicon-react-original colored',
             '.ts': 'devicon-typescript-plain colored',
+            '.mts': 'devicon-typescript-plain colored',
+            '.cts': 'devicon-typescript-plain colored',
+            '.tsx': 'devicon-react-original colored',
+            // Web
+            '.html': 'devicon-html5-plain colored',
+            '.css': 'devicon-css3-plain colored',
+            '.scss': 'devicon-sass-original colored',
+            '.sass': 'devicon-sass-original colored',
+            '.less': 'devicon-less-plain-wordmark colored',
+            '.vue': 'devicon-vuejs-plain colored',
+            '.svelte': 'devicon-svelte-plain colored',
+            // Systems / Backend
+            '.py': 'devicon-python-plain colored',
             '.java': 'devicon-java-plain colored',
             '.cs': 'devicon-csharp-plain colored',
             '.go': 'devicon-go-plain colored',
             '.rs': 'devicon-rust-original colored',
             '.rb': 'devicon-ruby-plain colored',
+            '.php': 'devicon-php-plain colored',
+            '.swift': 'devicon-swift-plain colored',
+            '.kt': 'devicon-kotlin-plain colored',
+            '.kts': 'devicon-kotlin-plain colored',
+            '.scala': 'devicon-scala-plain colored',
+            '.lua': 'devicon-lua-plain colored',
+            '.pl': 'devicon-perl-plain colored',
+            '.pm': 'devicon-perl-plain colored',
+            '.r': 'devicon-r-plain colored',
+            '.dart': 'devicon-dart-plain colored',
             '.c': 'devicon-c-plain colored',
             '.cpp': 'devicon-cplusplus-plain colored',
             '.h': 'devicon-c-plain colored',
-            '.html': 'devicon-html5-plain colored',
-            '.css': 'devicon-css3-plain colored',
+            '.hpp': 'devicon-cplusplus-plain colored',
+            // Data / Config
             '.json': 'devicon-json-plain colored',
             '.xml': 'devicon-xml-plain colored',
             '.yml': 'devicon-yaml-plain colored',
             '.yaml': 'devicon-yaml-plain colored',
+            '.toml': 'devicon-toml-plain colored',
+            '.graphql': 'devicon-graphql-plain colored',
+            '.gql': 'devicon-graphql-plain colored',
+            // Shell / Scripting
             '.sh': 'devicon-bash-plain colored',
+            '.bash': 'devicon-bash-plain colored',
+            '.zsh': 'devicon-bash-plain colored',
+            '.ps1': 'devicon-powershell-plain colored',
+            '.psm1': 'devicon-powershell-plain colored',
+            // DevOps / IaC
+            '.tf': 'devicon-terraform-plain colored',
+            '.tfvars': 'devicon-terraform-plain colored',
+            '.hcl': 'devicon-terraform-plain colored',
+            '.gradle': 'devicon-gradle-plain colored',
+            // Database
             '.sql': 'devicon-azuresqldatabase-plain colored',
+            // Docs
             '.md': 'devicon-markdown-original colored',
             '.markdown': 'devicon-markdown-original colored'
         };
         if (deviconMap[ext]) return '<i class="' + deviconMap[ext] + ' cp-icon"></i>';
         // Font Awesome for general file types
         if (ext === '.pdf') return '<i class="fa-solid fa-file-pdf cp-icon" style="color:#e74c3c;"></i>';
-        if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-image cp-icon" style="color:#3498db;"></i>';
-        if (['.zip','.tar','.gz','.rar','.7z'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-zipper cp-icon" style="color:#f39c12;"></i>';
-        if (ext === '.txt') return '<i class="fa-solid fa-file-lines cp-icon" style="color:#95a5a6;"></i>';
+        if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp','.ico'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-image cp-icon" style="color:#3498db;"></i>';
+        if (['.zip','.tar','.gz','.rar','.7z','.bz2','.xz','.tgz'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-zipper cp-icon" style="color:#f39c12;"></i>';
+        if (['.txt','.log','.cfg','.conf','.ini','.env','.properties'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-lines cp-icon" style="color:#95a5a6;"></i>';
+        if (['.csv','.tsv'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-csv cp-icon" style="color:#27ae60;"></i>';
+        if (['.doc','.docx','.odt','.rtf'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-word cp-icon" style="color:#2b579a;"></i>';
+        if (['.xls','.xlsx','.ods'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-excel cp-icon" style="color:#217346;"></i>';
+        if (['.ppt','.pptx','.odp'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-powerpoint cp-icon" style="color:#d24726;"></i>';
+        if (['.bat','.cmd'].indexOf(ext) >= 0) return '<i class="fa-solid fa-terminal cp-icon" style="color:#95a5a6;"></i>';
+        if (ext === '.proto') return '<i class="fa-solid fa-diagram-project cp-icon" style="color:#95a5a6;"></i>';
         return '<i class="fa-solid fa-file cp-icon" style="color:#95a5a6;"></i>';
     }
 
@@ -647,6 +745,58 @@
         if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
         if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
         return (bytes / 1073741824).toFixed(1) + ' GB';
+    }
+
+    function renderResourceFiles(files) {
+        var html = '';
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            var fName = g(f, 'Name') || '';
+            var fPath = g(f, 'RelativePath') || '';
+            var fExt = g(f, 'Extension') || '';
+            var fSize = g(f, 'Size') || 0;
+            html += '<div class="cp-res-file" data-cp-res-path="' + esc(fPath) + '" data-cp-res-ext="' + esc(fExt) + '" data-cp-res-name="' + esc(fName) + '">'
+                + '<span class="cp-res-file-icon">' + getFileIcon(fExt, fName) + '</span>'
+                + '<span class="cp-res-file-name">' + esc(fName) + '</span>'
+                + '<span class="cp-res-file-size">' + formatSize(fSize) + '</span>'
+                + '</div>';
+        }
+        return html;
+    }
+
+    function renderResourceFolders(folders) {
+        var html = '';
+        for (var i = 0; i < folders.length; i++) {
+            var rf = folders[i];
+            var rfName = g(rf, 'Name') || '';
+            var rfPath = g(rf, 'RelativePath') || '';
+            var rfFiles = g(rf, 'Files') || [];
+            var rfSubs = g(rf, 'SubFolders') || [];
+            var rfCount = countResourceTree(rfFiles, rfSubs);
+
+            html += '<div class="cp-resource-folder">'
+                + '<div class="cp-res-folder-hdr">'
+                + '<span class="cp-res-icon"><i class="fa-solid fa-folder-open"></i></span>'
+                + '<span class="cp-section-name">' + esc(rfName) + '</span>'
+                + '<span class="cp-section-count">' + rfCount + ' files</span>'
+                + '<button class="cp-res-dl-all" data-cp-zip-path="' + esc(rfPath) + '" title="Download all as zip">\u2b07</button>'
+                + '<span class="cp-section-arrow">\u25b6</span>'
+                + '</div>';
+            html += '<div class="cp-res-folder-files">';
+            html += renderResourceFiles(rfFiles);
+            html += renderResourceFolders(rfSubs);
+            html += '</div></div>';
+        }
+        return html;
+    }
+
+    function countResourceTree(files, folders) {
+        var count = files.length;
+        for (var i = 0; i < folders.length; i++) {
+            var sub = folders[i];
+            count += countResourceTree(g(sub, 'Files') || [], g(sub, 'SubFolders') || []);
+        }
+        return count;
     }
 
     function g(obj, key) {
@@ -769,13 +919,55 @@
         _previewModal.querySelector('.cp-preview-body').innerHTML = '';
     }
 
-    function openResourcePreview(courseId, path, ext) {
+    var _langMap = {
+        py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+        jsx: 'javascript', ts: 'typescript', mts: 'typescript', cts: 'typescript',
+        tsx: 'typescript', cs: 'csharp', sh: 'bash', bash: 'bash', zsh: 'bash',
+        ps1: 'powershell', psm1: 'powershell', bat: 'dos', cmd: 'dos',
+        yml: 'yaml', rs: 'rust', cpp: 'cpp', hpp: 'cpp', h: 'c',
+        rb: 'ruby', kt: 'kotlin', kts: 'kotlin', pl: 'perl', pm: 'perl',
+        tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', gradle: 'groovy',
+        scss: 'scss', sass: 'scss', less: 'less', vue: 'xml', svelte: 'xml',
+        gql: 'graphql', graphql: 'graphql', proto: 'protobuf',
+        md: 'markdown', markdown: 'markdown',
+        cfg: 'ini', conf: 'ini', properties: 'properties',
+        csv: 'plaintext', tsv: 'plaintext', log: 'plaintext', env: 'bash'
+    };
+
+    var _codeExtensions = [
+        '.py','.js','.mjs','.cjs','.jsx','.ts','.mts','.cts','.tsx',
+        '.java','.cs','.go','.rs','.rb','.php','.swift','.kt','.kts','.scala',
+        '.lua','.pl','.pm','.r','.dart','.c','.cpp','.h','.hpp',
+        '.sh','.bash','.zsh','.ps1','.psm1','.bat','.cmd',
+        '.yml','.yaml','.json','.xml','.toml','.graphql','.gql','.proto',
+        '.html','.css','.scss','.sass','.less','.vue','.svelte',
+        '.sql','.tf','.tfvars','.hcl','.gradle',
+        '.md','.markdown','.txt','.log','.cfg','.conf','.ini','.env',
+        '.properties','.csv','.tsv'
+    ];
+
+    var _codeFileNames = [
+        'dockerfile','jenkinsfile','vagrantfile','makefile','gnumakefile',
+        'gemfile','rakefile','kustomization','procfile'
+    ];
+
+    function isCodePreviewable(ext, name) {
+        if (ext && _codeExtensions.indexOf(ext) >= 0) return true;
+        if (!ext && name) {
+            var n = name.toLowerCase();
+            if (_codeFileNames.indexOf(n) >= 0) return true;
+            if (n === 'dockerfile' || n.indexOf('dockerfile.') === 0) return true;
+        }
+        return false;
+    }
+
+    function openResourcePreview(courseId, path, ext, name) {
         var modal = createPreviewModal();
         var dialog = modal.querySelector('.cp-preview-dialog');
         var body = dialog.querySelector('.cp-preview-body');
         var title = dialog.querySelector('.cp-preview-title');
         var dlBtn = dialog.querySelector('.cp-preview-dl');
-        var fileName = path.split('/').pop();
+        var fileName = name || path.split('/').pop();
         var fileUrl = resourceUrl(courseId, path);
 
         title.textContent = fileName;
@@ -787,10 +979,10 @@
 
         if (ext === '.pdf') {
             previewPdf(body, fileUrl);
-        } else if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) {
+        } else if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp','.ico'].indexOf(ext) >= 0) {
             previewImage(body, fileUrl);
-        } else if (['.py','.js','.ts','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.c','.cpp','.h','.md','.markdown','.txt'].indexOf(ext) >= 0) {
-            previewCode(body, fileUrl, ext);
+        } else if (isCodePreviewable(ext, fileName)) {
+            previewCode(body, fileUrl, ext, fileName);
         } else {
             body.innerHTML = '<div style="color:#888;padding:60px;text-align:center;">'
                 + '<div style="font-size:2.5em;margin-bottom:16px;"><i class="fa-solid fa-file"></i></div>'
@@ -827,7 +1019,7 @@
         });
     }
 
-    function previewCode(container, fileUrl, ext) {
+    function previewCode(container, fileUrl, ext, name) {
         Promise.all([
             loadCdn('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js', 'js'),
             loadCdn('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css', 'css')
@@ -835,8 +1027,18 @@
             return fetch(fileUrl).then(function (r) { return r.text(); });
         }).then(function (text) {
             var lang = ext.replace('.', '');
-            var langMap = { py: 'python', js: 'javascript', ts: 'typescript', cs: 'csharp', sh: 'bash', yml: 'yaml', rs: 'rust', cpp: 'cpp', h: 'c', rb: 'ruby' };
-            lang = langMap[lang] || lang;
+            // Handle extensionless files by name
+            if (!lang && name) {
+                var n = (name || '').toLowerCase();
+                if (n === 'dockerfile' || (n.indexOf('dockerfile.') === 0)) lang = 'dockerfile';
+                else if (n === 'jenkinsfile') lang = 'groovy';
+                else if (n === 'makefile' || n === 'gnumakefile') lang = 'makefile';
+                else if (n === 'vagrantfile' || n === 'gemfile' || n === 'rakefile') lang = 'ruby';
+                else if (n === 'kustomization') lang = 'yaml';
+                else if (n === 'procfile') lang = 'bash';
+                else lang = 'plaintext';
+            }
+            lang = _langMap[lang] || lang;
             container.innerHTML = '<pre style="margin:0;height:100%;overflow:auto;"><code class="language-' + lang + '"></code></pre>';
             var codeEl = container.querySelector('code');
             codeEl.textContent = text;
@@ -899,7 +1101,6 @@
             + '.cp-section-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             // Lessons
             + '.cp-lessons { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; border-left: 1px solid rgba(0,164,220,0.2); margin-left: 12px; }'
-            + '.cp-lessons.open { max-height: 5000px; }'
             + '.cp-lesson { display: flex; align-items: center; padding: 4px 0; gap: 6px; border-radius: 3px; }'
             + '.cp-lesson:hover { background: rgba(255,255,255,0.04); }'
             + '.cp-lesson.cp-playing { background: rgba(0,164,220,0.1); padding: 4px 6px; margin: 0 -6px; }'
@@ -922,21 +1123,21 @@
             + '.cp-icon { font-size: 1em; width: 1.2em; text-align: center; }'
             // Resources
             + '.cp-res-icon { font-size: 0.85em; flex-shrink: 0; }'
-            + '.cp-sec-resources { margin-left: 12px; border-left: 1px solid rgba(255,255,255,0.1); }'
+            + '.cp-sec-resources { }'
             + '.cp-sec-res-hdr { padding: 6px 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 4px; }'
             + '.cp-sec-res-hdr:hover { background: rgba(255,255,255,0.04); }'
             + '.cp-sec-res-label { flex: 1; font-size: 0.9em; color: #888; }'
             + '.cp-sec-res-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-sec-res-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 12px; }'
-            + '.cp-res-files.open { max-height: 3000px; }'
-            + '.cp-resource-folder { border-radius: 5px; margin-bottom: 4px; margin-top: 8px; }'
+            + '.cp-resource-root { margin-top: 8px; }'
+            + '.cp-res-root-body { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 16px; }'
+            + '.cp-resource-folder { border-radius: 5px; margin-bottom: 4px; margin-top: 4px; }'
             + '.cp-res-folder-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; background: rgba(255,255,255,0.04); }'
             + '.cp-res-folder-hdr:hover { background: rgba(255,255,255,0.07); }'
             + '.cp-res-folder-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-res-folder-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-folder-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; }'
-            + '.cp-res-folder-files.open { max-height: 3000px; }'
             + '.cp-res-dl-all { background: none; border: 1px solid #444; color: #999; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.7em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
             + '.cp-res-dl-all:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
             + '.cp-res-file { display: flex; align-items: center; padding: 4px 6px; gap: 6px; border-radius: 3px; cursor: pointer; }'

@@ -14,15 +14,21 @@ namespace Jellyfin.Plugin.Courses.Api;
 [Authorize]
 public class CoursesController : ControllerBase
 {
-    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
-    };
 
     private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".url", ".ini", ".nfo", ".html", ".htm"
     };
+
+    /// <summary>
+    /// Subtitle / media-adjacent files that sit next to videos but are NOT resources.
+    /// Jellyfin matches these to their parent video automatically.
+    /// </summary>
+    private static readonly HashSet<string> _subtitleExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".srt", ".sub", ".ass", ".ssa", ".vtt", ".idx", ".sup", ".pgs"
+    };
+
 
     private static readonly HashSet<string> _junkFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -196,10 +202,6 @@ public class CoursesController : ControllerBase
             }
             else
             {
-                // Find the subfolder path for section-level resource scanning.
-                var sectionPath = Path.GetDirectoryName(group.First().Video.Path) ?? string.Empty;
-                var sectionResources = ScanResourceFiles(sectionPath, folder.Path);
-
                 sections.Add(new SectionDto
                 {
                     Id = group.Key.Value,
@@ -208,7 +210,6 @@ public class CoursesController : ControllerBase
                     Lessons = lessons,
                     CompletedCount = lessons.Count(l => l.Played),
                     TotalCount = lessons.Count,
-                    Resources = sectionResources,
                 });
             }
         }
@@ -224,14 +225,11 @@ public class CoursesController : ControllerBase
                 Lessons = flatLessons,
                 CompletedCount = flatLessons.Count(l => l.Played),
                 TotalCount = flatLessons.Count,
-                Resources = ScanResourceFiles(folder.Path, folder.Path),
             });
         }
 
         var totalLessons = sections.Sum(s => s.TotalCount);
         var completedLessons = sections.Sum(s => s.CompletedCount);
-
-        var resourceFolders = ScanResourceFolders(folder.Path);
 
         return Ok(new CourseStructureDto
         {
@@ -241,7 +239,6 @@ public class CoursesController : ControllerBase
             TotalLessons = totalLessons,
             CompletedLessons = completedLessons,
             ProgressPercent = totalLessons > 0 ? (int)(completedLessons * 100.0 / totalLessons) : 0,
-            ResourceFolders = resourceFolders,
         });
     }
 
@@ -262,6 +259,48 @@ public class CoursesController : ControllerBase
         html = html.Replace("{{COURSE_ID}}", courseId.ToString());
 
         return Content(html, "text/html");
+    }
+
+    /// <summary>
+    /// Lazy resource scanner. Called per-section when the user expands a section,
+    /// or for the course root. Keeps the Structure endpoint fast.
+    /// </summary>
+    [HttpGet("{courseId}/ResourceScan")]
+    [ResponseCache(Duration = 60)]
+    public ActionResult ScanSectionResources([FromRoute] Guid courseId, [FromQuery] Guid? sectionId)
+    {
+        var course = _libraryManager.GetItemById(courseId);
+        if (course is not Folder courseFolder || !IsCoursePath(courseFolder.Path))
+        {
+            return NotFound("Course not found.");
+        }
+
+        string scanPath;
+        if (sectionId.HasValue)
+        {
+            var section = _libraryManager.GetItemById(sectionId.Value);
+            if (section is not Folder sectionFolder)
+            {
+                return NotFound("Section not found.");
+            }
+
+            // Verify the section is under this course.
+            if (!sectionFolder.Path.StartsWith(courseFolder.Path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("Section is not part of this course.");
+            }
+
+            scanPath = sectionFolder.Path;
+        }
+        else
+        {
+            scanPath = courseFolder.Path;
+        }
+
+        var files = ScanResourceFiles(scanPath, courseFolder.Path);
+        var folders = ScanResourceFolders(scanPath, courseFolder.Path, checkForVideos: true);
+
+        return Ok(new ResourceScanDto { Files = files, Folders = folders });
     }
 
     [HttpGet("{courseId}/Resources")]
@@ -439,12 +478,13 @@ public class CoursesController : ControllerBase
                 var fileName = Path.GetFileName(filePath);
                 var ext = Path.GetExtension(filePath);
 
-                if (_junkFileNames.Contains(fileName) || _junkExtensions.Contains(ext))
+                if (_junkFileNames.Contains(fileName) || _junkExtensions.Contains(ext)
+                    || _subtitleExtensions.Contains(ext))
                 {
                     continue;
                 }
 
-                if (_videoExtensions.Contains(ext))
+                if (Courses.VideoExtensions.All.Contains(ext))
                 {
                     // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
                     // MPEG-TS has 0x47 sync byte at 188-byte intervals. Checking two
@@ -487,46 +527,48 @@ public class CoursesController : ControllerBase
         return resources.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static List<ResourceFolderDto> ScanResourceFolders(string courseRootPath)
+    /// <summary>
+    /// Recursively scan subdirectories for resource folders.
+    /// When <paramref name="checkForVideos"/> is true (top-level call), directories that
+    /// contain video files are skipped — they're video sections, not resource folders.
+    /// Once a directory is confirmed as a resource folder, its children are scanned
+    /// without the video check.
+    /// </summary>
+    private static List<ResourceFolderDto> ScanResourceFolders(string scanRoot, string basePath, bool checkForVideos)
     {
         var folders = new List<ResourceFolderDto>();
-        if (!Directory.Exists(courseRootPath))
+        if (!Directory.Exists(scanRoot))
         {
             return folders;
         }
 
         try
         {
-            foreach (var dirPath in Directory.EnumerateDirectories(courseRootPath))
+            foreach (var dirPath in Directory.EnumerateDirectories(scanRoot))
             {
-                var dirName = Path.GetFileName(dirPath);
+                if (checkForVideos)
+                {
+                    var hasVideo = ScanResourceFiles_HasVideo(dirPath);
+                    if (hasVideo)
+                    {
+                        continue;
+                    }
+                }
 
-                // Skip junk folders (starting with "0.").
-                if (dirName.StartsWith("0.", StringComparison.Ordinal))
+                var files = ScanResourceFiles(dirPath, basePath);
+                var subFolders = ScanResourceFolders(dirPath, basePath, checkForVideos: false);
+                if (files.Count == 0 && subFolders.Count == 0)
                 {
                     continue;
                 }
 
-                // A resource folder has zero video files.
-                var hasVideo = Directory.EnumerateFiles(dirPath)
-                    .Any(f => _videoExtensions.Contains(Path.GetExtension(f)));
-                if (hasVideo)
-                {
-                    continue;
-                }
-
-                var files = ScanResourceFiles(dirPath, courseRootPath);
-                if (files.Count == 0)
-                {
-                    continue;
-                }
-
-                var relativePath = Path.GetRelativePath(courseRootPath, dirPath).Replace('\\', '/');
+                var relativePath = Path.GetRelativePath(basePath, dirPath).Replace('\\', '/');
                 folders.Add(new ResourceFolderDto
                 {
-                    Name = dirName,
+                    Name = Path.GetFileName(dirPath),
                     RelativePath = relativePath,
                     Files = files,
+                    SubFolders = subFolders,
                 });
             }
         }
@@ -536,6 +578,23 @@ public class CoursesController : ControllerBase
         }
 
         return folders.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Check if a directory subtree contains any unambiguous video files.
+    /// Uses a single-pass enumeration that short-circuits on first match.
+    /// </summary>
+    private static bool ScanResourceFiles_HasVideo(string dirPath)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(dirPath, "*", SearchOption.AllDirectories)
+                .Any(f => Courses.VideoExtensions.Unambiguous.Contains(Path.GetExtension(f)));
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return false;
+        }
     }
 }
 
@@ -577,7 +636,6 @@ public class SectionDto
 
     public int TotalCount { get; set; }
 
-    public List<ResourceFileDto> Resources { get; set; } = [];
 }
 
 public class CourseStructureDto
@@ -593,8 +651,13 @@ public class CourseStructureDto
     public int CompletedLessons { get; set; }
 
     public int ProgressPercent { get; set; }
+}
 
-    public List<ResourceFolderDto> ResourceFolders { get; set; } = [];
+public class ResourceScanDto
+{
+    public List<ResourceFileDto> Files { get; set; } = [];
+
+    public List<ResourceFolderDto> Folders { get; set; } = [];
 }
 
 public class ResourceFileDto
@@ -615,6 +678,8 @@ public class ResourceFolderDto
     public string RelativePath { get; set; } = string.Empty;
 
     public List<ResourceFileDto> Files { get; set; } = [];
+
+    public List<ResourceFolderDto> SubFolders { get; set; } = [];
 }
 
 public class FileCallbackResult : ActionResult

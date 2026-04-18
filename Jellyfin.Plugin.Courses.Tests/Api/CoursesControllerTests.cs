@@ -235,20 +235,6 @@ public class CoursesControllerTests
         Assert.Empty(dto.Files);
     }
 
-    [Fact]
-    public void SectionDto_Resources_DefaultEmpty()
-    {
-        var dto = new SectionDto();
-        Assert.Empty(dto.Resources);
-    }
-
-    [Fact]
-    public void CourseStructureDto_ResourceFolders_DefaultEmpty()
-    {
-        var dto = new CourseStructureDto();
-        Assert.Empty(dto.ResourceFolders);
-    }
-
     // --- GetResource ---
 
     [Fact]
