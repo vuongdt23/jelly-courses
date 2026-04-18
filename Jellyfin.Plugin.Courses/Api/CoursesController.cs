@@ -21,7 +21,7 @@ public class CoursesController : ControllerBase
 
     private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".txt", ".url", ".ini", ".nfo", ".html", ".htm"
+        ".url", ".ini", ".nfo", ".html", ".htm"
     };
 
     private static readonly HashSet<string> _junkFileNames = new(StringComparer.OrdinalIgnoreCase)
@@ -291,8 +291,9 @@ public class CoursesController : ControllerBase
         var courseRoot = folder.Path;
         var fullPath = Path.GetFullPath(Path.Combine(courseRoot, path));
 
-        // Verify the resolved path is under the course root.
-        if (!fullPath.StartsWith(courseRoot, StringComparison.OrdinalIgnoreCase))
+        // Verify the resolved path is under the course root (trailing separator prevents sibling match).
+        if (!fullPath.StartsWith(courseRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, courseRoot, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Invalid path.");
         }
@@ -446,16 +447,21 @@ public class CoursesController : ControllerBase
                 if (_videoExtensions.Contains(ext))
                 {
                     // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
-                    // MPEG-TS always starts with 0x47 sync byte; TypeScript starts with UTF-8 text.
+                    // MPEG-TS has 0x47 sync byte at 188-byte intervals. Checking two
+                    // positions avoids false positives (e.g. TypeScript starting with 'G' = 0x47).
                     if (string.Equals(ext, ".ts", StringComparison.OrdinalIgnoreCase))
                     {
-                        var buf = new byte[1];
+                        var buf = new byte[189];
                         using var probe = System.IO.File.OpenRead(filePath);
-                        if (probe.Read(buf, 0, 1) != 1 || buf[0] == 0x47)
+                        var bytesRead = probe.Read(buf, 0, buf.Length);
+                        var isMpegTs = bytesRead >= 189
+                            ? buf[0] == 0x47 && buf[188] == 0x47
+                            : bytesRead >= 1 && buf[0] == 0x47;
+                        if (bytesRead == 0 || isMpegTs)
                         {
                             continue; // MPEG-TS or empty — skip
                         }
-                        // Not 0x47 → TypeScript source, fall through to include as resource
+                        // Not MPEG-TS → TypeScript source, fall through to include as resource
                     }
                     else
                     {
