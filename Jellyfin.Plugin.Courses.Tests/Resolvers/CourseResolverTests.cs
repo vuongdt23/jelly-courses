@@ -61,16 +61,6 @@ public class CourseResolverTests
         Assert.IsType<CourseSection>(result);
     }
 
-    [Fact]
-    public void ResolvePath_JunkDirectory_ReturnsNull()
-    {
-        var parent = new Course { Name = "Test Course" };
-        var args = CreateArgs("/media/courses/TestCourse/0. Websites you may like", true, parent);
-
-        var result = _resolver.ResolvePath(args);
-
-        Assert.Null(result);
-    }
 
     [Fact]
     public void ResolvePath_CourseSectionSortIndex()

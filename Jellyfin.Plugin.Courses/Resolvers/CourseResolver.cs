@@ -22,6 +22,16 @@ public class CourseResolver : IItemResolver
         ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
     };
 
+    /// <summary>
+    /// Non-ambiguous video extensions used for directory-level scanning.
+    /// Excludes .ts because it's shared with TypeScript — a directory full of .ts files
+    /// is far more likely to be source code than MPEG transport streams.
+    /// </summary>
+    private static readonly HashSet<string> UnambiguousVideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v"
+    };
+
     private static readonly HashSet<string> JunkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".txt", ".url", ".ini", ".nfo", ".html", ".htm"
@@ -70,14 +80,18 @@ public class CourseResolver : IItemResolver
     {
         var name = Path.GetFileName(args.Path);
 
-        if (IsJunkFolder(name))
-        {
-            _logger.LogDebug("Skipping junk folder: {Path}", args.Path);
-            return null;
-        }
-
         if (args.Parent is Course or CourseSection)
         {
+            // Skip directories that contain no video files. This prevents Jellyfin
+            // from descending into resource/exercise directories (e.g. an Angular
+            // project with dozens of .ts source files) and running ffprobe on every
+            // non-video file it finds.
+            if (Directory.Exists(args.Path) && !ContainsVideoFiles(args.Path))
+            {
+                _logger.LogDebug("Skipping non-video directory: {Path}", args.Path);
+                return null;
+            }
+
             var sortIndex = CourseItemNaming.ParseSortIndex(name) ?? 0;
             var cleanName = CourseItemNaming.CleanName(name);
             return new CourseSection
@@ -152,10 +166,22 @@ public class CourseResolver : IItemResolver
         };
     }
 
-    private static bool IsJunkFolder(string name)
+    /// <summary>
+    /// Checks whether a directory (or any of its descendants) contains at least one
+    /// file with an unambiguous video extension. Uses <see cref="UnambiguousVideoExtensions"/>
+    /// so that directories full of TypeScript .ts files are not mistaken for video sections.
+    /// </summary>
+    private static bool ContainsVideoFiles(string directoryPath)
     {
-        // "0. Websites you may like" pattern — common in pirated course bundles.
-        return name.StartsWith("0.", StringComparison.Ordinal);
+        try
+        {
+            return Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories)
+                .Any(f => UnambiguousVideoExtensions.Contains(Path.GetExtension(f)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool IsCourseLibraryPath(string path)
