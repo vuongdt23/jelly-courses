@@ -215,4 +215,70 @@ public class CoursesControllerTests
         Assert.Single(dto.Sections);
         Assert.Equal(2, dto.Sections[0].Lessons.Count);
     }
+
+    [Fact]
+    public void ResourceFileDto_DefaultValues()
+    {
+        var dto = new ResourceFileDto();
+        Assert.Equal(string.Empty, dto.Name);
+        Assert.Equal(string.Empty, dto.RelativePath);
+        Assert.Equal(string.Empty, dto.Extension);
+        Assert.Equal(0, dto.Size);
+    }
+
+    [Fact]
+    public void ResourceFolderDto_DefaultValues()
+    {
+        var dto = new ResourceFolderDto();
+        Assert.Equal(string.Empty, dto.Name);
+        Assert.Equal(string.Empty, dto.RelativePath);
+        Assert.Empty(dto.Files);
+    }
+
+    [Fact]
+    public void SectionDto_Resources_DefaultEmpty()
+    {
+        var dto = new SectionDto();
+        Assert.Empty(dto.Resources);
+    }
+
+    [Fact]
+    public void CourseStructureDto_ResourceFolders_DefaultEmpty()
+    {
+        var dto = new CourseStructureDto();
+        Assert.Empty(dto.ResourceFolders);
+    }
+
+    // --- GetResource ---
+
+    [Fact]
+    public void GetResource_CourseNotFound_ReturnsNotFound()
+    {
+        var courseId = Guid.NewGuid();
+        _libraryManager.Setup(x => x.GetItemById(courseId)).Returns((BaseItem?)null);
+
+        var result = _controller.GetResource(courseId, "notes.pdf");
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public void GetResource_MissingPath_ReturnsBadRequest()
+    {
+        var courseId = Guid.NewGuid();
+
+        var result = _controller.GetResource(courseId, "");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public void GetResource_PathTraversal_ReturnsBadRequest()
+    {
+        var courseId = Guid.NewGuid();
+
+        var result = _controller.GetResource(courseId, "../../../etc/passwd");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
 }

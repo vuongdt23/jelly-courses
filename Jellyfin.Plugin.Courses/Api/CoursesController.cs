@@ -1,7 +1,9 @@
+using System.IO.Compression;
 using System.Reflection;
 using Jellyfin.Database.Implementations;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -9,8 +11,24 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Courses.Api;
 
 [Route("Courses")]
+[Authorize]
 public class CoursesController : ControllerBase
 {
+    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
+    };
+
+    private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".url", ".ini", ".nfo", ".html", ".htm"
+    };
+
+    private static readonly HashSet<string> _junkFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "desktop.ini", ".ds_store", "thumbs.db"
+    };
+
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
@@ -34,6 +52,7 @@ public class CoursesController : ControllerBase
     [HttpGet("client.js")]
     [Produces("application/javascript")]
     [ResponseCache(NoStore = true)]
+    [AllowAnonymous]
     public ActionResult GetClientScript()
     {
         var stream = Assembly.GetExecutingAssembly()
@@ -177,6 +196,10 @@ public class CoursesController : ControllerBase
             }
             else
             {
+                // Find the subfolder path for section-level resource scanning.
+                var sectionPath = Path.GetDirectoryName(group.First().Video.Path) ?? string.Empty;
+                var sectionResources = ScanResourceFiles(sectionPath, folder.Path);
+
                 sections.Add(new SectionDto
                 {
                     Id = group.Key.Value,
@@ -185,6 +208,7 @@ public class CoursesController : ControllerBase
                     Lessons = lessons,
                     CompletedCount = lessons.Count(l => l.Played),
                     TotalCount = lessons.Count,
+                    Resources = sectionResources,
                 });
             }
         }
@@ -200,11 +224,14 @@ public class CoursesController : ControllerBase
                 Lessons = flatLessons,
                 CompletedCount = flatLessons.Count(l => l.Played),
                 TotalCount = flatLessons.Count,
+                Resources = ScanResourceFiles(folder.Path, folder.Path),
             });
         }
 
         var totalLessons = sections.Sum(s => s.TotalCount);
         var completedLessons = sections.Sum(s => s.CompletedCount);
+
+        var resourceFolders = ScanResourceFolders(folder.Path);
 
         return Ok(new CourseStructureDto
         {
@@ -214,6 +241,7 @@ public class CoursesController : ControllerBase
             TotalLessons = totalLessons,
             CompletedLessons = completedLessons,
             ProgressPercent = totalLessons > 0 ? (int)(completedLessons * 100.0 / totalLessons) : 0,
+            ResourceFolders = resourceFolders,
         });
     }
 
@@ -234,6 +262,82 @@ public class CoursesController : ControllerBase
         html = html.Replace("{{COURSE_ID}}", courseId.ToString());
 
         return Content(html, "text/html");
+    }
+
+    [HttpGet("{courseId}/Resources")]
+    public ActionResult GetResource(
+        [FromRoute] Guid courseId,
+        [FromQuery] string path,
+        [FromQuery] bool download = false,
+        [FromQuery] bool zip = false)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return BadRequest("path is required.");
+        }
+
+        // Reject path traversal attempts early.
+        if (path.Contains("..", StringComparison.Ordinal))
+        {
+            return BadRequest("Invalid path.");
+        }
+
+        var item = _libraryManager.GetItemById(courseId);
+        if (item is not Folder folder || !IsCoursePath(folder.Path))
+        {
+            return NotFound("Course not found.");
+        }
+
+        var courseRoot = folder.Path;
+        var fullPath = Path.GetFullPath(Path.Combine(courseRoot, path));
+
+        // Verify the resolved path is under the course root (trailing separator prevents sibling match).
+        if (!fullPath.StartsWith(courseRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, courseRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Invalid path.");
+        }
+
+        // Directory → zip download.
+        if (Directory.Exists(fullPath))
+        {
+            if (!zip)
+            {
+                return BadRequest("Use zip=true for directory downloads.");
+            }
+
+            var folderName = Path.GetFileName(fullPath);
+            Response.Headers.ContentDisposition = $"attachment; filename=\"{folderName}.zip\"";
+            return new FileCallbackResult("application/zip", (stream, _) =>
+            {
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+                foreach (var file in Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories))
+                {
+                    var entryName = Path.GetRelativePath(fullPath, file).Replace('\\', '/');
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    using var entryStream = entry.Open();
+                    using var fileStream = System.IO.File.OpenRead(file);
+                    fileStream.CopyTo(entryStream);
+                }
+                return Task.CompletedTask;
+            });
+        }
+
+        // File → serve directly.
+        if (!System.IO.File.Exists(fullPath))
+        {
+            return NotFound("File not found.");
+        }
+
+        var contentType = GetContentType(Path.GetExtension(fullPath));
+        var fileName = Path.GetFileName(fullPath);
+
+        if (download)
+        {
+            return PhysicalFile(fullPath, contentType, fileName);
+        }
+
+        return PhysicalFile(fullPath, contentType);
     }
 
     private static bool IsCoursePath(string? path)
@@ -294,6 +398,145 @@ public class CoursesController : ControllerBase
             .OrderBy(l => l.SortName)
             .ToArray();
     }
+
+    private static string GetContentType(string extension)
+    {
+        return extension.ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".py" or ".js" or ".ts" or ".java" or ".cs" or ".sh" or ".rb" or ".go" or ".rs"
+                or ".c" or ".cpp" or ".h" or ".css" or ".xml" or ".sql"
+                or ".md" or ".markdown" or ".txt" => "text/plain",
+            ".json" => "application/json",
+            ".yml" or ".yaml" => "text/yaml",
+            ".zip" => "application/zip",
+            ".tar" => "application/x-tar",
+            ".gz" => "application/gzip",
+            ".rar" => "application/vnd.rar",
+            ".7z" => "application/x-7z-compressed",
+            _ => "application/octet-stream",
+        };
+    }
+
+    private static List<ResourceFileDto> ScanResourceFiles(string directoryPath, string basePath)
+    {
+        var resources = new List<ResourceFileDto>();
+        if (!Directory.Exists(directoryPath))
+        {
+            return resources;
+        }
+
+        try
+        {
+            foreach (var filePath in Directory.EnumerateFiles(directoryPath))
+            {
+                var fileName = Path.GetFileName(filePath);
+                var ext = Path.GetExtension(filePath);
+
+                if (_junkFileNames.Contains(fileName) || _junkExtensions.Contains(ext))
+                {
+                    continue;
+                }
+
+                if (_videoExtensions.Contains(ext))
+                {
+                    // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
+                    // MPEG-TS has 0x47 sync byte at 188-byte intervals. Checking two
+                    // positions avoids false positives (e.g. TypeScript starting with 'G' = 0x47).
+                    if (string.Equals(ext, ".ts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var buf = new byte[189];
+                        using var probe = System.IO.File.OpenRead(filePath);
+                        var bytesRead = probe.Read(buf, 0, buf.Length);
+                        var isMpegTs = bytesRead >= 189
+                            ? buf[0] == 0x47 && buf[188] == 0x47
+                            : bytesRead >= 1 && buf[0] == 0x47;
+                        if (bytesRead == 0 || isMpegTs)
+                        {
+                            continue; // MPEG-TS or empty — skip
+                        }
+                        // Not MPEG-TS → TypeScript source, fall through to include as resource
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+                var relativePath = Path.GetRelativePath(basePath, filePath).Replace('\\', '/');
+                resources.Add(new ResourceFileDto
+                {
+                    Name = fileName,
+                    RelativePath = relativePath,
+                    Extension = ext.ToLowerInvariant(),
+                    Size = new FileInfo(filePath).Length,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // Permission errors or race conditions — return what we have.
+        }
+
+        return resources.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<ResourceFolderDto> ScanResourceFolders(string courseRootPath)
+    {
+        var folders = new List<ResourceFolderDto>();
+        if (!Directory.Exists(courseRootPath))
+        {
+            return folders;
+        }
+
+        try
+        {
+            foreach (var dirPath in Directory.EnumerateDirectories(courseRootPath))
+            {
+                var dirName = Path.GetFileName(dirPath);
+
+                // Skip junk folders (starting with "0.").
+                if (dirName.StartsWith("0.", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // A resource folder has zero video files.
+                var hasVideo = Directory.EnumerateFiles(dirPath)
+                    .Any(f => _videoExtensions.Contains(Path.GetExtension(f)));
+                if (hasVideo)
+                {
+                    continue;
+                }
+
+                var files = ScanResourceFiles(dirPath, courseRootPath);
+                if (files.Count == 0)
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(courseRootPath, dirPath).Replace('\\', '/');
+                folders.Add(new ResourceFolderDto
+                {
+                    Name = dirName,
+                    RelativePath = relativePath,
+                    Files = files,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // Permission errors or race conditions — return what we have.
+        }
+
+        return folders.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
 }
 
 public class LessonDto
@@ -333,6 +576,8 @@ public class SectionDto
     public int CompletedCount { get; set; }
 
     public int TotalCount { get; set; }
+
+    public List<ResourceFileDto> Resources { get; set; } = [];
 }
 
 public class CourseStructureDto
@@ -348,4 +593,52 @@ public class CourseStructureDto
     public int CompletedLessons { get; set; }
 
     public int ProgressPercent { get; set; }
+
+    public List<ResourceFolderDto> ResourceFolders { get; set; } = [];
+}
+
+public class ResourceFileDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
+    public string Extension { get; set; } = string.Empty;
+
+    public long Size { get; set; }
+}
+
+public class ResourceFolderDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
+    public List<ResourceFileDto> Files { get; set; } = [];
+}
+
+public class FileCallbackResult : ActionResult
+{
+    private readonly string _contentType;
+    private readonly Func<Stream, CancellationToken, Task> _callback;
+
+    public FileCallbackResult(string contentType, Func<Stream, CancellationToken, Task> callback)
+    {
+        _contentType = contentType;
+        _callback = callback;
+    }
+
+    public override async Task ExecuteResultAsync(ActionContext context)
+    {
+        var response = context.HttpContext.Response;
+        response.ContentType = _contentType;
+        // ZipArchive uses synchronous writes internally.
+        var syncIoFeature = context.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpBodyControlFeature>();
+        if (syncIoFeature != null)
+        {
+            syncIoFeature.AllowSynchronousIO = true;
+        }
+
+        await _callback(response.Body, context.HttpContext.RequestAborted);
+    }
 }
