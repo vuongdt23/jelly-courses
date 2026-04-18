@@ -14,10 +14,6 @@ namespace Jellyfin.Plugin.Courses.Api;
 [Authorize]
 public class CoursesController : ControllerBase
 {
-    private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
-    };
 
     private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -33,13 +29,6 @@ public class CoursesController : ControllerBase
         ".srt", ".sub", ".ass", ".ssa", ".vtt", ".idx", ".sup", ".pgs"
     };
 
-    /// <summary>
-    /// Non-ambiguous video extensions for directory-level scanning (excludes .ts).
-    /// </summary>
-    private static readonly HashSet<string> _unambiguousVideoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v"
-    };
 
     private static readonly HashSet<string> _junkFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -309,7 +298,7 @@ public class CoursesController : ControllerBase
         }
 
         var files = ScanResourceFiles(scanPath, courseFolder.Path);
-        var folders = ScanResourceFolders(scanPath, courseFolder.Path);
+        var folders = ScanResourceFolders(scanPath, courseFolder.Path, checkForVideos: true);
 
         return Ok(new ResourceScanDto { Files = files, Folders = folders });
     }
@@ -495,7 +484,7 @@ public class CoursesController : ControllerBase
                     continue;
                 }
 
-                if (_videoExtensions.Contains(ext))
+                if (Courses.VideoExtensions.All.Contains(ext))
                 {
                     // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
                     // MPEG-TS has 0x47 sync byte at 188-byte intervals. Checking two
@@ -538,7 +527,14 @@ public class CoursesController : ControllerBase
         return resources.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static List<ResourceFolderDto> ScanResourceFolders(string scanRoot, string basePath)
+    /// <summary>
+    /// Recursively scan subdirectories for resource folders.
+    /// When <paramref name="checkForVideos"/> is true (top-level call), directories that
+    /// contain video files are skipped — they're video sections, not resource folders.
+    /// Once a directory is confirmed as a resource folder, its children are scanned
+    /// without the video check.
+    /// </summary>
+    private static List<ResourceFolderDto> ScanResourceFolders(string scanRoot, string basePath, bool checkForVideos)
     {
         var folders = new List<ResourceFolderDto>();
         if (!Directory.Exists(scanRoot))
@@ -550,19 +546,17 @@ public class CoursesController : ControllerBase
         {
             foreach (var dirPath in Directory.EnumerateDirectories(scanRoot))
             {
-                var dirName = Path.GetFileName(dirPath);
-
-                // A resource folder has zero video files in its entire subtree.
-                // Uses unambiguous set (excludes .ts) so TypeScript dirs aren't skipped.
-                var hasVideo = Directory.EnumerateFiles(dirPath, "*", SearchOption.AllDirectories)
-                    .Any(f => _unambiguousVideoExtensions.Contains(Path.GetExtension(f)));
-                if (hasVideo)
+                if (checkForVideos)
                 {
-                    continue;
+                    var hasVideo = ScanResourceFiles_HasVideo(dirPath);
+                    if (hasVideo)
+                    {
+                        continue;
+                    }
                 }
 
                 var files = ScanResourceFiles(dirPath, basePath);
-                var subFolders = ScanResourceSubFolders(dirPath, basePath);
+                var subFolders = ScanResourceFolders(dirPath, basePath, checkForVideos: false);
                 if (files.Count == 0 && subFolders.Count == 0)
                 {
                     continue;
@@ -571,7 +565,7 @@ public class CoursesController : ControllerBase
                 var relativePath = Path.GetRelativePath(basePath, dirPath).Replace('\\', '/');
                 folders.Add(new ResourceFolderDto
                 {
-                    Name = dirName,
+                    Name = Path.GetFileName(dirPath),
                     RelativePath = relativePath,
                     Files = files,
                     SubFolders = subFolders,
@@ -587,39 +581,20 @@ public class CoursesController : ControllerBase
     }
 
     /// <summary>
-    /// Recursively scan subdirectories of a confirmed resource folder (no video check needed).
+    /// Check if a directory subtree contains any unambiguous video files.
+    /// Uses a single-pass enumeration that short-circuits on first match.
     /// </summary>
-    private static List<ResourceFolderDto> ScanResourceSubFolders(string scanRoot, string basePath)
+    private static bool ScanResourceFiles_HasVideo(string dirPath)
     {
-        var folders = new List<ResourceFolderDto>();
         try
         {
-            foreach (var dirPath in Directory.EnumerateDirectories(scanRoot))
-            {
-                var dirName = Path.GetFileName(dirPath);
-                var files = ScanResourceFiles(dirPath, basePath);
-                var subFolders = ScanResourceSubFolders(dirPath, basePath);
-                if (files.Count == 0 && subFolders.Count == 0)
-                {
-                    continue;
-                }
-
-                var relativePath = Path.GetRelativePath(basePath, dirPath).Replace('\\', '/');
-                folders.Add(new ResourceFolderDto
-                {
-                    Name = dirName,
-                    RelativePath = relativePath,
-                    Files = files,
-                    SubFolders = subFolders,
-                });
-            }
+            return Directory.EnumerateFiles(dirPath, "*", SearchOption.AllDirectories)
+                .Any(f => Courses.VideoExtensions.Unambiguous.Contains(Path.GetExtension(f)));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            // Permission errors or race conditions — return what we have.
+            return false;
         }
-
-        return folders.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
 
@@ -661,9 +636,6 @@ public class SectionDto
 
     public int TotalCount { get; set; }
 
-    public List<ResourceFileDto> Resources { get; set; } = [];
-
-    public List<ResourceFolderDto> ResourceFolders { get; set; } = [];
 }
 
 public class CourseStructureDto
@@ -679,10 +651,6 @@ public class CourseStructureDto
     public int CompletedLessons { get; set; }
 
     public int ProgressPercent { get; set; }
-
-    public List<ResourceFileDto> Resources { get; set; } = [];
-
-    public List<ResourceFolderDto> ResourceFolders { get; set; } = [];
 }
 
 public class ResourceScanDto

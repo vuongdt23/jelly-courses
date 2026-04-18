@@ -17,20 +17,6 @@ namespace Jellyfin.Plugin.Courses.Resolvers;
 /// </summary>
 public class CourseResolver : IItemResolver
 {
-    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v", ".ts"
-    };
-
-    /// <summary>
-    /// Non-ambiguous video extensions used for directory-level scanning.
-    /// Excludes .ts because it's shared with TypeScript — a directory full of .ts files
-    /// is far more likely to be source code than MPEG transport streams.
-    /// </summary>
-    private static readonly HashSet<string> UnambiguousVideoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".avi", ".webm", ".mov", ".wmv", ".flv", ".m4v"
-    };
 
     private static readonly HashSet<string> JunkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -119,7 +105,7 @@ public class CourseResolver : IItemResolver
             return null;
         }
 
-        if (!VideoExtensions.Contains(ext))
+        if (!Courses.VideoExtensions.All.Contains(ext))
         {
             return null;
         }
@@ -168,18 +154,19 @@ public class CourseResolver : IItemResolver
 
     /// <summary>
     /// Checks whether a directory (or any of its descendants) contains at least one
-    /// file with an unambiguous video extension. Uses <see cref="UnambiguousVideoExtensions"/>
+    /// file with an unambiguous video extension. Uses <see cref="VideoExtensions.Unambiguous"/>
     /// so that directories full of TypeScript .ts files are not mistaken for video sections.
     /// </summary>
-    private static bool ContainsVideoFiles(string directoryPath)
+    private bool ContainsVideoFiles(string directoryPath)
     {
         try
         {
             return Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories)
-                .Any(f => UnambiguousVideoExtensions.Contains(Path.GetExtension(f)));
+                .Any(f => Courses.VideoExtensions.Unambiguous.Contains(Path.GetExtension(f)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            _logger.LogWarning(ex, "Cannot enumerate files in {Path}, skipping directory", directoryPath);
             return false;
         }
     }

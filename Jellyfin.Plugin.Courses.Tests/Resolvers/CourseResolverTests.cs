@@ -61,7 +61,6 @@ public class CourseResolverTests
         Assert.IsType<CourseSection>(result);
     }
 
-
     [Fact]
     public void ResolvePath_CourseSectionSortIndex()
     {
@@ -265,5 +264,122 @@ public class CourseResolverTests
     public void Priority_IsPlugin()
     {
         Assert.Equal(MediaBrowser.Controller.Resolvers.ResolverPriority.Plugin, _resolver.Priority);
+    }
+
+    // --- ContainsVideoFiles integration tests (real temp directories) ---
+
+    [Fact]
+    public void ResolvePath_DirectoryWithVideoFiles_ReturnsCourseSection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "course-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(tempDir, "lesson.mp4"), new byte[] { 0 });
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempDir, true, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.NotNull(result);
+            Assert.IsType<CourseSection>(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_DirectoryWithOnlyTypeScriptFiles_ReturnsNull()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "course-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "app.component.ts"), "import { Component } from '@angular/core';");
+            File.WriteAllText(Path.Combine(tempDir, "main.ts"), "platformBrowserDynamic();");
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempDir, true, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.Null(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_EmptyDirectory_ReturnsNull()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "course-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempDir, true, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.Null(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_DirectoryWithMixedVideoAndResourceFiles_ReturnsCourseSection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "course-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(tempDir, "lesson.mkv"), new byte[] { 0 });
+            File.WriteAllText(Path.Combine(tempDir, "notes.pdf"), "dummy");
+            File.WriteAllText(Path.Combine(tempDir, "code.py"), "print('hello')");
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempDir, true, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.NotNull(result);
+            Assert.IsType<CourseSection>(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_DirectoryWithNestedVideoFile_ReturnsCourseSection()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "course-test-" + Guid.NewGuid());
+        var subDir = Path.Combine(tempDir, "sub");
+        Directory.CreateDirectory(subDir);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(subDir, "deep.mp4"), new byte[] { 0 });
+
+            var parent = new Course { Name = "Test" };
+            var args = CreateArgs(tempDir, true, parent);
+
+            var result = _resolver.ResolvePath(args);
+
+            Assert.NotNull(result);
+            Assert.IsType<CourseSection>(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
     }
 }

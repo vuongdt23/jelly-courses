@@ -26,12 +26,37 @@
         localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
     }
 
+    // Toggle a collapsible panel using scrollHeight for accurate animation.
+    function toggleCollapsible(el) {
+        if (!el) return;
+        if (el.classList.contains('open')) {
+            // Collapse: set max-height to current scrollHeight, then force reflow, then set to 0
+            el.style.maxHeight = el.scrollHeight + 'px';
+            // Force reflow so the browser registers the starting value
+            el.offsetHeight; // eslint-disable-line no-unused-expressions
+            el.style.maxHeight = '0';
+            el.classList.remove('open');
+        } else {
+            el.classList.add('open');
+            el.style.maxHeight = el.scrollHeight + 'px';
+            // After transition, remove max-height so dynamically added content isn't clipped
+            var onEnd = function () {
+                el.removeEventListener('transitionend', onEnd);
+                if (el.classList.contains('open')) {
+                    el.style.maxHeight = 'none';
+                }
+            };
+            el.addEventListener('transitionend', onEnd);
+        }
+    }
+
     // Module-level sidebar state
     var sidebarEl = null;
     var backdropEl = null;
     var lastCourseData = null;
     var lastCourseId = null;
     var lastProgressPct = 0;
+    var resourceCache = {};
 
     // DOM helpers
     function getHeaderHeight() {
@@ -127,6 +152,11 @@
 
     function renderSidebarContent(data, courseId) {
         if (!data || !sidebarEl) return;
+
+        // Clear resource cache when switching courses
+        if (courseId !== lastCourseId) {
+            resourceCache = {};
+        }
 
         lastCourseData = data;
         lastCourseId = courseId;
@@ -318,12 +348,11 @@
                 var idx = this.getAttribute('data-cpidx');
                 var lessonsDiv = sidebarEl.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
                 if (lessonsDiv) {
-                    lessonsDiv.classList.toggle('open');
+                    toggleCollapsible(lessonsDiv);
                     // Lazy-load resources on first expand
                     if (lessonsDiv.classList.contains('open')) {
                         var placeholder = lessonsDiv.querySelector('.cp-sec-resources-lazy');
-                        if (placeholder && !placeholder._loaded) {
-                            placeholder._loaded = true;
+                        if (placeholder) {
                             var secId = placeholder.getAttribute('data-cp-section-id');
                             loadResources(placeholder, secId, courseId);
                         }
@@ -387,41 +416,48 @@
         }
 
         // 8. Lazy-load resources when section is expanded
-        var resourceCache = {};
         function loadResources(container, sectionId, cid) {
-            if (resourceCache[sectionId]) return;
+            if (resourceCache[sectionId] === 'loading') return;
+            if (resourceCache[sectionId]) {
+                renderCachedResources(container, resourceCache[sectionId], sectionId, cid);
+                return;
+            }
             resourceCache[sectionId] = 'loading';
             container.innerHTML = '<div class="cp-res-loading" style="color:#555;font-size:0.8em;padding:6px 8px;"><i class="fa-solid fa-spinner fa-spin"></i> Loading resources\u2026</div>';
             var url = '/Courses/' + cid + '/ResourceScan' + (sectionId !== cid ? '?sectionId=' + sectionId : '');
             apiFetch(url).then(function (res) {
                 resourceCache[sectionId] = res;
-                var files = g(res, 'Files') || [];
-                var folders = g(res, 'Folders') || [];
-                if (files.length === 0 && folders.length === 0) {
-                    container.innerHTML = '';
-                    return;
-                }
-                var fileCount = countResourceTree(files, folders);
-                var isCourse = sectionId === cid;
-                var hdrClass = isCourse ? 'cp-sec-res-hdr cp-course-res-hdr' : 'cp-sec-res-hdr';
-                var bodyClass = isCourse ? 'cp-res-root-body' : 'cp-res-files';
-                var html = '<div class="' + (isCourse ? 'cp-resource-root' : 'cp-sec-resources') + '">'
-                    + '<div class="' + hdrClass + '">'
-                    + '<span class="cp-res-icon"><i class="fa-solid fa-paperclip"></i></span>'
-                    + '<span class="cp-sec-res-label">Resources</span>'
-                    + '<span class="cp-section-count">' + fileCount + ' files</span>'
-                    + '<span class="cp-section-arrow">\u25b6</span>'
-                    + '</div>'
-                    + '<div class="' + bodyClass + '">'
-                    + renderResourceFiles(files)
-                    + renderResourceFolders(folders)
-                    + '</div></div>';
-                container.innerHTML = html;
-                wireResourceEvents(container, cid);
+                renderCachedResources(container, res, sectionId, cid);
             }).catch(function () {
                 container.innerHTML = '';
                 resourceCache[sectionId] = null;
             });
+        }
+
+        function renderCachedResources(container, res, sectionId, cid) {
+            var files = g(res, 'Files') || [];
+            var folders = g(res, 'Folders') || [];
+            if (files.length === 0 && folders.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            var fileCount = countResourceTree(files, folders);
+            var isCourse = sectionId === cid;
+            var hdrClass = isCourse ? 'cp-sec-res-hdr cp-course-res-hdr' : 'cp-sec-res-hdr';
+            var bodyClass = isCourse ? 'cp-res-root-body' : 'cp-res-files';
+            var html = '<div class="' + (isCourse ? 'cp-resource-root' : 'cp-sec-resources') + '">'
+                + '<div class="' + hdrClass + '">'
+                + '<span class="cp-res-icon"><i class="fa-solid fa-paperclip"></i></span>'
+                + '<span class="cp-sec-res-label">Resources</span>'
+                + '<span class="cp-section-count">' + fileCount + ' files</span>'
+                + '<span class="cp-section-arrow">\u25b6</span>'
+                + '</div>'
+                + '<div class="' + bodyClass + '">'
+                + renderResourceFiles(files)
+                + renderResourceFolders(folders)
+                + '</div></div>';
+            container.innerHTML = html;
+            wireResourceEvents(container, cid);
         }
 
         function wireResourceEvents(root, cid) {
@@ -429,7 +465,7 @@
             root.querySelectorAll('.cp-sec-res-hdr').forEach(function (hdr) {
                 hdr.addEventListener('click', function () {
                     var body = this.nextElementSibling;
-                    if (body) body.classList.toggle('open');
+                    toggleCollapsible(body);
                     this.classList.toggle('open');
                 });
             });
@@ -438,7 +474,7 @@
                 hdr.addEventListener('click', function (e) {
                     if (e.target.closest('.cp-res-dl-all')) return;
                     var body = this.nextElementSibling;
-                    if (body) body.classList.toggle('open');
+                    toggleCollapsible(body);
                     this.classList.toggle('open');
                 });
             });
@@ -623,7 +659,7 @@
         };
         if (!ext && nameMap[name]) return '<i class="' + nameMap[name] + ' cp-icon"></i>';
         // Also match Dockerfile.* variants
-        if (!ext && name.indexOf('dockerfile') === 0) return '<i class="devicon-docker-plain colored cp-icon"></i>';
+        if (!ext && (name === 'dockerfile' || name.indexOf('dockerfile.') === 0)) return '<i class="devicon-docker-plain colored cp-icon"></i>';
         // Devicon language-specific icons — 'colored' class provides brand colors
         var deviconMap = {
             // JavaScript / TypeScript
@@ -883,6 +919,21 @@
         _previewModal.querySelector('.cp-preview-body').innerHTML = '';
     }
 
+    var _langMap = {
+        py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+        jsx: 'javascript', ts: 'typescript', mts: 'typescript', cts: 'typescript',
+        tsx: 'typescript', cs: 'csharp', sh: 'bash', bash: 'bash', zsh: 'bash',
+        ps1: 'powershell', psm1: 'powershell', bat: 'dos', cmd: 'dos',
+        yml: 'yaml', rs: 'rust', cpp: 'cpp', hpp: 'cpp', h: 'c',
+        rb: 'ruby', kt: 'kotlin', kts: 'kotlin', pl: 'perl', pm: 'perl',
+        tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', gradle: 'groovy',
+        scss: 'scss', sass: 'scss', less: 'less', vue: 'xml', svelte: 'xml',
+        gql: 'graphql', graphql: 'graphql', proto: 'protobuf',
+        md: 'markdown', markdown: 'markdown',
+        cfg: 'ini', conf: 'ini', properties: 'properties',
+        csv: 'plaintext', tsv: 'plaintext', log: 'plaintext', env: 'bash'
+    };
+
     var _codeExtensions = [
         '.py','.js','.mjs','.cjs','.jsx','.ts','.mts','.cts','.tsx',
         '.java','.cs','.go','.rs','.rb','.php','.swift','.kt','.kts','.scala',
@@ -905,7 +956,7 @@
         if (!ext && name) {
             var n = name.toLowerCase();
             if (_codeFileNames.indexOf(n) >= 0) return true;
-            if (n.indexOf('dockerfile') === 0) return true;
+            if (n === 'dockerfile' || n.indexOf('dockerfile.') === 0) return true;
         }
         return false;
     }
@@ -976,24 +1027,10 @@
             return fetch(fileUrl).then(function (r) { return r.text(); });
         }).then(function (text) {
             var lang = ext.replace('.', '');
-            var langMap = {
-                py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
-                jsx: 'javascript', ts: 'typescript', mts: 'typescript', cts: 'typescript',
-                tsx: 'typescript', cs: 'csharp', sh: 'bash', bash: 'bash', zsh: 'bash',
-                ps1: 'powershell', psm1: 'powershell', bat: 'dos', cmd: 'dos',
-                yml: 'yaml', rs: 'rust', cpp: 'cpp', hpp: 'cpp', h: 'c',
-                rb: 'ruby', kt: 'kotlin', kts: 'kotlin', pl: 'perl', pm: 'perl',
-                tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', gradle: 'groovy',
-                scss: 'scss', sass: 'scss', less: 'less', vue: 'xml', svelte: 'xml',
-                gql: 'graphql', graphql: 'graphql', proto: 'protobuf',
-                md: 'markdown', markdown: 'markdown',
-                cfg: 'ini', conf: 'ini', properties: 'properties',
-                csv: 'plaintext', tsv: 'plaintext', log: 'plaintext', env: 'bash'
-            };
             // Handle extensionless files by name
             if (!lang && name) {
                 var n = (name || '').toLowerCase();
-                if (n === 'dockerfile' || n.indexOf('dockerfile') === 0) lang = 'dockerfile';
+                if (n === 'dockerfile' || (n.indexOf('dockerfile.') === 0)) lang = 'dockerfile';
                 else if (n === 'jenkinsfile') lang = 'groovy';
                 else if (n === 'makefile' || n === 'gnumakefile') lang = 'makefile';
                 else if (n === 'vagrantfile' || n === 'gemfile' || n === 'rakefile') lang = 'ruby';
@@ -1001,7 +1038,7 @@
                 else if (n === 'procfile') lang = 'bash';
                 else lang = 'plaintext';
             }
-            lang = langMap[lang] || lang;
+            lang = _langMap[lang] || lang;
             container.innerHTML = '<pre style="margin:0;height:100%;overflow:auto;"><code class="language-' + lang + '"></code></pre>';
             var codeEl = container.querySelector('code');
             codeEl.textContent = text;
@@ -1064,7 +1101,6 @@
             + '.cp-section-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             // Lessons
             + '.cp-lessons { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; border-left: 1px solid rgba(0,164,220,0.2); margin-left: 12px; }'
-            + '.cp-lessons.open { max-height: 50000px; }'
             + '.cp-lesson { display: flex; align-items: center; padding: 4px 0; gap: 6px; border-radius: 3px; }'
             + '.cp-lesson:hover { background: rgba(255,255,255,0.04); }'
             + '.cp-lesson.cp-playing { background: rgba(0,164,220,0.1); padding: 4px 6px; margin: 0 -6px; }'
@@ -1094,17 +1130,14 @@
             + '.cp-sec-res-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-sec-res-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 12px; }'
-            + '.cp-res-files.open { max-height: 50000px; }'
             + '.cp-resource-root { margin-top: 8px; }'
             + '.cp-res-root-body { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 16px; }'
-            + '.cp-res-root-body.open { max-height: 50000px; }'
             + '.cp-resource-folder { border-radius: 5px; margin-bottom: 4px; margin-top: 4px; }'
             + '.cp-res-folder-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; background: rgba(255,255,255,0.04); }'
             + '.cp-res-folder-hdr:hover { background: rgba(255,255,255,0.07); }'
             + '.cp-res-folder-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-res-folder-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-folder-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; }'
-            + '.cp-res-folder-files.open { max-height: 50000px; }'
             + '.cp-res-dl-all { background: none; border: 1px solid #444; color: #999; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.7em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
             + '.cp-res-dl-all:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
             + '.cp-res-file { display: flex; align-items: center; padding: 4px 6px; gap: 6px; border-radius: 3px; cursor: pointer; }'
