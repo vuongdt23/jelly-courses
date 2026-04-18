@@ -271,14 +271,12 @@
                     + '</div>';
             }
 
-            html += '</div>'; // close .cp-lessons
-
-            // Section-level resources
+            // Section-level resources (inside lessons so they collapse together)
             var secResources = g(sec, 'Resources') || [];
             if (secResources.length > 0) {
                 html += '<div class="cp-sec-resources" data-cpridx="' + i + '">'
                     + '<div class="cp-sec-res-hdr" data-cpridx="' + i + '">'
-                    + '<span class="cp-res-icon">\ud83d\udcc2</span>'
+                    + '<span class="cp-res-icon"><i class="fa-solid fa-paperclip"></i></span>'
                     + '<span class="cp-sec-res-label">Resources</span>'
                     + '<span class="cp-section-count">' + secResources.length + ' files</span>'
                     + '<span class="cp-section-arrow">\u25b6</span>'
@@ -299,6 +297,7 @@
                 html += '</div></div>';
             }
 
+            html += '</div>'; // close .cp-lessons
             html += '</div>'; // close .cp-section
         }
 
@@ -312,7 +311,7 @@
 
             html += '<div class="cp-resource-folder">'
                 + '<div class="cp-res-folder-hdr" data-cpfidx="' + fi + '">'
-                + '<span class="cp-res-icon">\ud83d\udcc2</span>'
+                + '<span class="cp-res-icon"><i class="fa-solid fa-folder-open"></i></span>'
                 + '<span class="cp-section-name">' + esc(rfName) + '</span>'
                 + '<span class="cp-section-count">' + rfFiles.length + ' files</span>'
                 + '<button class="cp-res-dl-all" data-cp-zip-path="' + esc(rfPath) + '" title="Download all as zip">\u2b07</button>'
@@ -610,11 +609,37 @@
 
     function getFileIcon(ext) {
         ext = (ext || '').toLowerCase();
-        if (ext === '.pdf') return '\ud83d\udcc4';
-        if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) return '\ud83d\uddbc';
-        if (['.py','.js','.java','.cs','.sh','.yml','.yaml','.json','.xml','.html','.css','.sql','.rb','.go','.rs','.ts','.c','.cpp','.h','.md','.markdown','.txt'].indexOf(ext) >= 0) return '\ud83d\udcbb';
-        if (['.zip','.tar','.gz','.rar','.7z'].indexOf(ext) >= 0) return '\ud83d\udce6';
-        return '\ud83d\udcc4';
+        // Devicon language-specific icons — 'colored' class provides brand colors
+        var deviconMap = {
+            '.py': 'devicon-python-plain colored',
+            '.js': 'devicon-javascript-plain colored',
+            '.ts': 'devicon-typescript-plain colored',
+            '.java': 'devicon-java-plain colored',
+            '.cs': 'devicon-csharp-plain colored',
+            '.go': 'devicon-go-plain colored',
+            '.rs': 'devicon-rust-original colored',
+            '.rb': 'devicon-ruby-plain colored',
+            '.c': 'devicon-c-plain colored',
+            '.cpp': 'devicon-cplusplus-plain colored',
+            '.h': 'devicon-c-plain colored',
+            '.html': 'devicon-html5-plain colored',
+            '.css': 'devicon-css3-plain colored',
+            '.json': 'devicon-json-plain colored',
+            '.xml': 'devicon-xml-plain colored',
+            '.yml': 'devicon-yaml-plain colored',
+            '.yaml': 'devicon-yaml-plain colored',
+            '.sh': 'devicon-bash-plain colored',
+            '.sql': 'devicon-azuresqldatabase-plain colored',
+            '.md': 'devicon-markdown-original colored',
+            '.markdown': 'devicon-markdown-original colored'
+        };
+        if (deviconMap[ext]) return '<i class="' + deviconMap[ext] + ' cp-icon"></i>';
+        // Font Awesome for general file types
+        if (ext === '.pdf') return '<i class="fa-solid fa-file-pdf cp-icon" style="color:#e74c3c;"></i>';
+        if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-image cp-icon" style="color:#3498db;"></i>';
+        if (['.zip','.tar','.gz','.rar','.7z'].indexOf(ext) >= 0) return '<i class="fa-solid fa-file-zipper cp-icon" style="color:#f39c12;"></i>';
+        if (ext === '.txt') return '<i class="fa-solid fa-file-lines cp-icon" style="color:#95a5a6;"></i>';
+        return '<i class="fa-solid fa-file cp-icon" style="color:#95a5a6;"></i>';
     }
 
     function formatSize(bytes) {
@@ -684,6 +709,12 @@
             .catch(function () { });
     }
 
+    // Load icon libraries (Font Awesome + Devicon) eagerly — they're tiny CSS-only
+    function loadIconLibraries() {
+        loadCdn('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css', 'css');
+        loadCdn('https://cdn.jsdelivr.net/gh/devicons/devicon@latest/devicon.min.css', 'css');
+    }
+
     // CDN library lazy-loading
     var _cdnLoaded = {};
     function loadCdn(url, type) {
@@ -711,13 +742,15 @@
         if (_previewModal) return _previewModal;
         _previewModal = document.createElement('div');
         _previewModal.className = 'cp-preview-overlay';
-        _previewModal.innerHTML = '<div class="cp-preview-header">'
+        _previewModal.innerHTML = '<div class="cp-preview-dialog">'
+            + '<div class="cp-preview-header">'
             + '<span class="cp-preview-title"></span>'
-            + '<div style="display:flex;gap:8px;">'
-            + '<button class="cp-preview-dl">Download</button>'
-            + '<button class="cp-preview-close">\u00d7</button>'
+            + '<div class="cp-preview-actions">'
+            + '<button class="cp-preview-dl"><i class="fa-solid fa-download"></i> Download</button>'
+            + '<button class="cp-preview-close"><i class="fa-solid fa-xmark"></i></button>'
             + '</div></div>'
-            + '<div class="cp-preview-body"></div>';
+            + '<div class="cp-preview-body"></div>'
+            + '</div>';
         document.body.appendChild(_previewModal);
 
         _previewModal.querySelector('.cp-preview-close').addEventListener('click', closePreview);
@@ -738,9 +771,10 @@
 
     function openResourcePreview(courseId, path, ext) {
         var modal = createPreviewModal();
-        var body = modal.querySelector('.cp-preview-body');
-        var title = modal.querySelector('.cp-preview-title');
-        var dlBtn = modal.querySelector('.cp-preview-dl');
+        var dialog = modal.querySelector('.cp-preview-dialog');
+        var body = dialog.querySelector('.cp-preview-body');
+        var title = dialog.querySelector('.cp-preview-title');
+        var dlBtn = dialog.querySelector('.cp-preview-dl');
         var fileName = path.split('/').pop();
         var fileUrl = resourceUrl(courseId, path);
 
@@ -759,7 +793,7 @@
             previewCode(body, fileUrl, ext);
         } else {
             body.innerHTML = '<div style="color:#888;padding:60px;text-align:center;">'
-                + '<div style="font-size:2em;margin-bottom:16px;">\ud83d\udcc1</div>'
+                + '<div style="font-size:2.5em;margin-bottom:16px;"><i class="fa-solid fa-file"></i></div>'
                 + 'No preview available for this file type.'
                 + '<br><br><button class="cp-preview-dl-fallback" style="background:#00a4dc;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;">Download File</button>'
                 + '</div>';
@@ -822,7 +856,7 @@
         style.id = 'cp-sidebar-styles';
         style.textContent = ''
             // Sidebar shell
-            + '.cp-sidebar { position: fixed; left: 0; bottom: 0; z-index: 999; background: #111114; border-right: 1px solid #222; display: flex; flex-direction: column; transition: width 250ms ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; box-sizing: border-box; }'
+            + '.cp-sidebar { position: fixed; left: 0; bottom: 0; z-index: 999; background: #1e1e24; border-right: 1px solid #2a2a30; display: flex; flex-direction: column; transition: width 250ms ease; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; box-sizing: border-box; }'
             + '.cp-sidebar * { box-sizing: border-box; }'
             + '.cp-sidebar.cp-collapsed { width: 28px; cursor: pointer; overflow: hidden; }'
             + '.cp-sidebar.cp-hidden { display: none; }'
@@ -834,8 +868,8 @@
             // Header (expanded)
             + '.cp-header { padding: 14px; background: linear-gradient(180deg, rgba(0,164,220,0.12) 0%, transparent 100%); border-bottom: 1px solid rgba(255,255,255,0.05); }'
             + '.cp-course-icon { width: 28px; height: 28px; background: #00a4dc; border-radius: 5px; color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }'
-            + '.cp-course-name { color: #eee; font-size: 0.9em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
-            + '.cp-course-meta { color: #666; font-size: 0.75em; }'
+            + '.cp-course-name { color: #eee; font-size: 1em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-course-meta { color: #666; font-size: 0.8em; }'
             + '.cp-close-btn { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 4px 2px; line-height: 1; flex-shrink: 0; z-index: 1; }'
             + '.cp-close-btn:hover { color: #999; }'
             // Segmented progress
@@ -855,9 +889,9 @@
             + '.cp-section-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; }'
             + '.cp-section-hdr:hover { background: rgba(255,255,255,0.04); }'
             + '.cp-section-dot { font-size: 10px; flex-shrink: 0; }'
-            + '.cp-section-name { flex: 1; font-size: 0.85em; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-section-name { flex: 1; font-size: 0.95em; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
             + '.cp-section-name.cp-struck { text-decoration: line-through; }'
-            + '.cp-section-count { font-size: 0.75em; color: #555; flex-shrink: 0; }'
+            + '.cp-section-count { font-size: 0.8em; color: #555; flex-shrink: 0; }'
             + '.cp-section-badge { font-size: 0.65em; color: #4caf50; flex-shrink: 0; }'
             + '.cp-section-play { background: none; border: 1px solid #444; color: #999; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.55em; transition: all 0.2s; flex-shrink: 0; padding: 0; }'
             + '.cp-section-play:hover { border-color: #00a4dc; color: #00a4dc; background: rgba(0,164,220,0.1); }'
@@ -874,29 +908,31 @@
             + '.cp-lesson-status.played { color: #4caf50; }'
             + '.cp-lesson-status.unplayed { color: #444; }'
             + '.cp-lesson-name { flex: 1; min-width: 0; }'
-            + '.cp-lesson-name a { color: #888; text-decoration: none; font-size: 0.8em; cursor: pointer; }'
+            + '.cp-lesson-name a { color: #888; text-decoration: none; font-size: 0.9em; cursor: pointer; }'
             + '.cp-lesson-name a:hover { color: #00a4dc; }'
             + '.cp-next-badge { background: #00a4dc; color: #fff; font-size: 0.55em; padding: 1px 4px; border-radius: 2px; flex-shrink: 0; }'
-            + '.cp-lesson-dur { color: #555; font-size: 0.7em; flex-shrink: 0; }'
+            + '.cp-lesson-dur { color: #555; font-size: 0.8em; flex-shrink: 0; }'
             // Resize handle
             + '.cp-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 1000; }'
             + '.cp-resize-handle::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 4px; height: 40px; background: rgba(255,255,255,0.1); border-radius: 2px; opacity: 0; transition: opacity 150ms; }'
             + '.cp-resize-handle:hover::after { opacity: 1; }'
             // Content push
             + '.cp-content-push { transition: margin-left 250ms ease; }'
+            // File icons
+            + '.cp-icon { font-size: 1em; width: 1.2em; text-align: center; }'
             // Resources
             + '.cp-res-icon { font-size: 0.85em; flex-shrink: 0; }'
             + '.cp-sec-resources { margin-left: 12px; border-left: 1px solid rgba(255,255,255,0.1); }'
             + '.cp-sec-res-hdr { padding: 6px 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 4px; }'
             + '.cp-sec-res-hdr:hover { background: rgba(255,255,255,0.04); }'
-            + '.cp-sec-res-label { flex: 1; font-size: 0.8em; color: #888; }'
+            + '.cp-sec-res-label { flex: 1; font-size: 0.9em; color: #888; }'
             + '.cp-sec-res-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-sec-res-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 12px; }'
             + '.cp-res-files.open { max-height: 3000px; }'
             + '.cp-resource-folder { border-radius: 5px; margin-bottom: 4px; margin-top: 8px; }'
-            + '.cp-res-folder-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; background: rgba(255,255,255,0.02); }'
-            + '.cp-res-folder-hdr:hover { background: rgba(255,255,255,0.05); }'
+            + '.cp-res-folder-hdr { padding: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 5px; background: rgba(255,255,255,0.04); }'
+            + '.cp-res-folder-hdr:hover { background: rgba(255,255,255,0.07); }'
             + '.cp-res-folder-hdr .cp-section-arrow { color: #666; transition: transform 200ms; font-size: 0.7em; }'
             + '.cp-res-folder-hdr.open .cp-section-arrow { transform: rotate(90deg); }'
             + '.cp-res-folder-files { max-height: 0; overflow: hidden; transition: max-height 200ms ease-out; padding-left: 20px; }'
@@ -906,17 +942,20 @@
             + '.cp-res-file { display: flex; align-items: center; padding: 4px 6px; gap: 6px; border-radius: 3px; cursor: pointer; }'
             + '.cp-res-file:hover { background: rgba(255,255,255,0.04); }'
             + '.cp-res-file-icon { font-size: 0.8em; flex-shrink: 0; }'
-            + '.cp-res-file-name { flex: 1; font-size: 0.8em; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
-            + '.cp-res-file-size { font-size: 0.7em; color: #555; flex-shrink: 0; }'
+            + '.cp-res-file-name { flex: 1; font-size: 0.9em; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
+            + '.cp-res-file-size { font-size: 0.8em; color: #555; flex-shrink: 0; }'
             // Preview modal
-            + '.cp-preview-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; background: rgba(0,0,0,0.85); flex-direction: column; }'
-            + '.cp-preview-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #1a1a1e; border-bottom: 1px solid #333; flex-shrink: 0; }'
-            + '.cp-preview-title { color: #eee; font-size: 0.9em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }'
-            + '.cp-preview-dl { background: #00a4dc; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; font-size: 0.8em; cursor: pointer; }'
-            + '.cp-preview-dl:hover { opacity: 0.9; }'
-            + '.cp-preview-close { background: none; border: none; color: #888; font-size: 1.4em; cursor: pointer; padding: 2px 6px; line-height: 1; }'
-            + '.cp-preview-close:hover { color: #fff; }'
+            + '.cp-preview-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; }'
+            + '.cp-preview-dialog { width: 80%; max-width: 1100px; height: 85vh; max-height: 85vh; background: #1a1a1e; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }'
+            + '.cp-preview-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: #222228; border-bottom: 1px solid #333; flex-shrink: 0; gap: 12px; }'
+            + '.cp-preview-title { color: #eee; font-size: 1em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }'
+            + '.cp-preview-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }'
+            + '.cp-preview-dl { background: #00a4dc; color: #fff; border: none; padding: 8px 20px; border-radius: 6px; font-size: 0.9em; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.2s; }'
+            + '.cp-preview-dl:hover { background: #0090c4; }'
+            + '.cp-preview-close { background: rgba(255,255,255,0.1); border: none; color: #aaa; font-size: 1.1em; cursor: pointer; width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }'
+            + '.cp-preview-close:hover { background: rgba(255,255,255,0.15); color: #fff; }'
             + '.cp-preview-body { flex: 1; overflow: auto; display: flex; flex-direction: column; }'
+            + '@media (max-width: 767px) { .cp-preview-dialog { width: 95%; height: 90vh; border-radius: 8px; } }'
             // Responsive
             + '@media (max-width: 767px) { .cp-sidebar.cp-expanded { position: fixed; width: 85vw !important; max-width: 360px; box-shadow: 4px 0 20px rgba(0,0,0,0.5); } }'
             + '.cp-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.5); z-index: 998; display: none; }';
@@ -970,6 +1009,7 @@
 
     function init() {
         injectStyles();
+        loadIconLibraries();
         createSidebar();
         var lastUrl = '';
         var navGeneration = 0;

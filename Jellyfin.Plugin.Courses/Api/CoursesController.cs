@@ -445,7 +445,22 @@ public class CoursesController : ControllerBase
 
                 if (_videoExtensions.Contains(ext))
                 {
-                    continue;
+                    // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
+                    // MPEG-TS always starts with 0x47 sync byte; TypeScript starts with UTF-8 text.
+                    if (string.Equals(ext, ".ts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var buf = new byte[1];
+                        using var probe = System.IO.File.OpenRead(filePath);
+                        if (probe.Read(buf, 0, 1) != 1 || buf[0] == 0x47)
+                        {
+                            continue; // MPEG-TS or empty — skip
+                        }
+                        // Not 0x47 → TypeScript source, fall through to include as resource
+                    }
+                    else
+                    {
+                        continue;
+                    }
                 }
 
                 var relativePath = Path.GetRelativePath(basePath, filePath).Replace('\\', '/');
