@@ -4,9 +4,14 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Version>1.1.0.1</Version>
     <AssemblyVersion>1.1.0.1</AssemblyVersion>
+    <Authors>vuongdt23</Authors>
+    <Company>vuongdt23</Company>
+    <Description>Browse and track progress through downloaded educational courses with a collapsible sidebar, progress tracking, and one-click playback.</Description>
+    <RepositoryUrl>https://github.com/vuongdt23/jelly-courses</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>
