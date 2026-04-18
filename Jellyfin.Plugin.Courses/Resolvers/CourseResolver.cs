@@ -110,6 +110,32 @@ public class CourseResolver : IItemResolver
             return null;
         }
 
+        // .ts is ambiguous: MPEG Transport Stream (video) vs TypeScript (code).
+        // MPEG-TS has 0x47 sync byte at 188-byte intervals. If not MPEG-TS, skip
+        // so Jellyfin doesn't try to ffprobe TypeScript files.
+        if (string.Equals(ext, ".ts", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var buf = new byte[189];
+                using var probe = File.OpenRead(args.Path);
+                var bytesRead = probe.Read(buf, 0, buf.Length);
+                var isMpegTs = bytesRead >= 189
+                    ? buf[0] == 0x47 && buf[188] == 0x47
+                    : bytesRead >= 1 && buf[0] == 0x47;
+                if (!isMpegTs)
+                {
+                    _logger.LogDebug("Skipping non-MPEG-TS .ts file: {Path}", args.Path);
+                    return null;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogDebug("Cannot probe .ts file, skipping: {Path}", args.Path);
+                return null;
+            }
+        }
+
         if (args.Parent is not (Course or CourseSection))
         {
             return null;
