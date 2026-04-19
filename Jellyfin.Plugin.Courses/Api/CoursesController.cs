@@ -242,25 +242,6 @@ public class CoursesController : ControllerBase
         });
     }
 
-    [HttpGet("{courseId}/Overview")]
-    public ActionResult GetOverview([FromRoute] Guid courseId)
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = "Jellyfin.Plugin.Courses.Web.courseOverview.html";
-
-        using var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream is null)
-        {
-            return NotFound("Overview page not found.");
-        }
-
-        using var reader = new StreamReader(stream);
-        var html = reader.ReadToEnd();
-        html = html.Replace("{{COURSE_ID}}", courseId.ToString());
-
-        return Content(html, "text/html");
-    }
-
     /// <summary>
     /// Lazy resource scanner. Called per-section when the user expands a section,
     /// or for the course root. Keeps the Structure endpoint fast.
