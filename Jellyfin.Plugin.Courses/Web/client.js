@@ -334,10 +334,11 @@
         if (continueBtn) {
             continueBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                var ids = (completed >= total && total > 0)
-                    ? getAllLessonIds(sections)
-                    : getLessonIdsFromContinue(sections);
-                playItems(ids);
+                var allIds = getAllLessonIds(sections);
+                var startIdx = (completed >= total && total > 0)
+                    ? 0
+                    : getContinueIndex(sections);
+                playItems(allIds, startIdx);
             });
         }
 
@@ -386,7 +387,7 @@
             });
         });
 
-        // 6. Lesson name click — play from that lesson to end of section
+        // 6. Lesson name click — play from that lesson through end of section
         sidebarEl.querySelectorAll('a[data-cp-play]').forEach(function (el) {
             el.addEventListener('click', function (e) {
                 e.preventDefault();
@@ -396,13 +397,13 @@
                 var sec = sections[secIdx];
                 if (!sec) return;
                 var lessons = g(sec, 'Lessons') || [];
-                var ids = [];
-                var found = false;
+                var allIds = [];
+                var startIndex = 0;
                 for (var k = 0; k < lessons.length; k++) {
-                    if (g(lessons[k], 'Id') === lessonId) found = true;
-                    if (found) ids.push(g(lessons[k], 'Id'));
+                    if (g(lessons[k], 'Id') === lessonId) startIndex = k;
+                    allIds.push(g(lessons[k], 'Id'));
                 }
-                playItems(ids);
+                playItems(allIds, startIndex);
             });
         });
 
@@ -815,24 +816,17 @@
         return ids;
     }
 
-    // Get lesson IDs starting from the first unplayed one.
-    function getLessonIdsFromContinue(sections) {
-        var ids = [];
-        var foundUnplayed = false;
+    // Get the flat index of the first unplayed lesson across all sections.
+    function getContinueIndex(sections) {
+        var idx = 0;
         for (var i = 0; i < sections.length; i++) {
             var lessons = g(sections[i], 'Lessons') || [];
             for (var j = 0; j < lessons.length; j++) {
-                if (!foundUnplayed && !g(lessons[j], 'Played')) {
-                    foundUnplayed = true;
-                }
-                if (foundUnplayed) {
-                    ids.push(g(lessons[j], 'Id'));
-                }
+                if (!g(lessons[j], 'Played')) return idx;
+                idx++;
             }
         }
-        // All played — return all for replay.
-        if (!foundUnplayed) return getAllLessonIds(sections);
-        return ids;
+        return 0; // all played — start from beginning
     }
 
     // Callback set by init() — clears lastUrl so the overview refreshes
@@ -840,18 +834,20 @@
     var invalidateOverview = function () {};
 
     // Play a list of item IDs using the Sessions API (max 100 to avoid URI limits).
-    function playItems(itemIds) {
+    // startIndex tells Jellyfin which item in the list to begin playback from.
+    function playItems(itemIds, startIndex) {
         if (!itemIds || !itemIds.length) return;
         var auth = getAuth();
         if (!auth) return;
         invalidateOverview();
         itemIds = itemIds.slice(0, 100);
+        var startParam = (startIndex && startIndex > 0) ? '&startIndex=' + startIndex : '';
         apiFetch('/Sessions?ControllableByUserId=' + auth.userId)
             .then(function (sessions) {
                 if (!sessions || !sessions.length) return;
                 var sessionId = sessions[0].Id;
                 return fetch(window.location.origin + '/Sessions/' + sessionId
-                    + '/Playing?playCommand=PlayNow&itemIds=' + itemIds.join(','), {
+                    + '/Playing?playCommand=PlayNow&itemIds=' + itemIds.join(',') + startParam, {
                     method: 'POST',
                     headers: { 'Authorization': 'MediaBrowser Token="' + auth.token + '"' }
                 });
