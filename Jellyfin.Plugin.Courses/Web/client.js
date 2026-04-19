@@ -217,13 +217,8 @@
             var sgSec = sections[sgi];
             var sgCompleted = g(sgSec, 'CompletedCount') || 0;
             var sgTotal = g(sgSec, 'TotalCount') || 0;
-            var sgClass = 'pending';
-            if (sgTotal > 0 && sgCompleted >= sgTotal) {
-                sgClass = 'done';
-            } else if (sgCompleted > 0) {
-                sgClass = 'active';
-            }
-            html += '<div class="cp-seg ' + sgClass + '" style="flex:' + sgTotal + ';"></div>';
+            var sgPct = sgTotal > 0 ? Math.round(sgCompleted / sgTotal * 100) : 0;
+            html += '<div class="cp-seg" style="flex:' + sgTotal + ';"><div class="cp-seg-fill" style="width:' + sgPct + '%;"></div></div>';
         }
         html += '</div>';
 
@@ -610,7 +605,8 @@
             statuses.forEach(function(s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
             var sTotal = statuses.length;
             if (segs[idx]) {
-                segs[idx].className = 'cp-seg ' + (sPlayed >= sTotal && sTotal > 0 ? 'done' : sPlayed > 0 ? 'active' : 'pending');
+                var fill = segs[idx].querySelector('.cp-seg-fill');
+                if (fill) fill.style.width = (sTotal > 0 ? Math.round(sPlayed / sTotal * 100) : 0) + '%';
             }
         });
 
@@ -1072,10 +1068,8 @@
             + '.cp-close-btn:hover { color: #999; }'
             // Segmented progress
             + '.cp-seg-bar { display: flex; gap: 3px; height: 6px; margin: 10px 14px 0; }'
-            + '.cp-seg { border-radius: 2px; transition: background 0.3s; }'
-            + '.cp-seg.done { background: #4caf50; }'
-            + '.cp-seg.active { background: #00a4dc; }'
-            + '.cp-seg.pending { background: rgba(255,255,255,0.08); }'
+            + '.cp-seg { border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }'
+            + '.cp-seg-fill { height: 100%; background: #00a4dc; border-radius: 2px; transition: width 0.3s; }'
             // Continue button
             + '.cp-continue-btn { margin: 10px 14px; background: linear-gradient(135deg, #00a4dc, #0090c4); color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: center; transition: opacity 0.2s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'
             + '.cp-continue-btn:hover { opacity: 0.9; }'
