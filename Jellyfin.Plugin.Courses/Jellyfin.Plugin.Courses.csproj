@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>1.1.0.1</Version>
-    <AssemblyVersion>1.1.0.1</AssemblyVersion>
+    <Version>1.1.0.2</Version>
+    <AssemblyVersion>1.1.0.2</AssemblyVersion>
     <Authors>vuongdt23</Authors>
     <Company>vuongdt23</Company>
     <Description>Browse and track progress through downloaded educational courses with a collapsible sidebar, progress tracking, and one-click playback.</Description>

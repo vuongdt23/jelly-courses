@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.1.0.2",
+        "changelog": "See release notes on GitHub",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/vuongdt23/jelly-courses/releases/download/v1.1.0.2/Jellyfin.Plugin.Courses.zip",
+        "checksum": "f2bbc004b35fd254555dbfc54b542fe4",
+        "timestamp": "2026-04-19T07:27:06Z"
+      },
+      {
         "version": "1.1.0.1",
         "changelog": "See release notes on GitHub",
         "targetAbi": "10.11.0.0",
