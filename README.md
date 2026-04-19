@@ -5,11 +5,15 @@ A Jellyfin plugin for browsing and tracking progress through downloaded educatio
 ## Features
 
 - **Collapsible sidebar** -- persistent course navigation panel that pushes Jellyfin's content aside, with a collapsed tab handle when closed
-- **Progress tracking** -- per-section and per-course progress bars, mark lessons played/unwatched
-- **Folder-level playback** -- play all videos in a course or section with a single click, continue from where you left off
+- **Progress tracking** -- per-section and per-course segmented progress bars, mark lessons played/unwatched with a single click
+- **Folder-level playback** -- play all videos in a course or section, continue from where you left off
+- **Resource file browsing** -- non-video files (PDFs, code, archives, etc.) are surfaced in a collapsible tree under each section, lazy-loaded on demand for fast initial render
+- **File preview modal** -- inline preview for code (syntax-highlighted via highlight.js), PDFs, and images with zoom/rotate support
+- **50+ file type icons** -- language-specific icons via Devicon (TypeScript, Python, Go, Rust, Kotlin, Docker, Terraform, etc.) and Font Awesome for general file types
 - **Smart naming** -- strips number prefixes, site tags, bracketed URLs, and junk suffixes from filenames
-- **Junk filtering** -- skips non-video files (.txt, .url, .nfo, etc.) and junk folders
-- **Subfolder browsing** -- any subfolder with videos renders its own sidebar view with progress
+- **TypeScript/.ts disambiguation** -- distinguishes MPEG Transport Stream video files from TypeScript source files using magic byte detection
+- **Junk filtering** -- skips non-video files (.nfo, .url, .ini, etc.), subtitle files (.srt, .vtt, .ass, etc.), and system files (desktop.ini, .DS_Store)
+- **Non-video directory skipping** -- directories without video files (e.g., exercise_files with only code) are excluded from the course tree to avoid ffprobe overhead
 
 ## Requirements
 
@@ -43,7 +47,7 @@ A Jellyfin plugin for browsing and tracking progress through downloaded educatio
 
 ## Folder Structure
 
-The plugin expects each root-level folder in your library to be a course. Courses can be flat (videos directly inside) or sectioned (videos grouped in subfolders).
+The plugin expects each root-level folder in your library to be a course. Courses can be flat (videos directly inside) or sectioned (videos grouped in subfolders). Non-video files are surfaced as downloadable resources.
 
 ```
 /Your Courses Library/
@@ -51,12 +55,30 @@ The plugin expects each root-level folder in your library to be a course. Course
     /01 - Section Name/
       01 - Lesson.mp4
       02 - Lesson.mp4
+      exercise_files/          <-- shown as resources
+        main.py
+        README.md
     /02 - Another Section/
       01 - Lesson.mp4
+      slides.pdf               <-- shown as resource
   /Another Course/
     lesson1.mp4
     lesson2.mp4
 ```
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /Courses/client.js` | Serves the frontend script (anonymous) |
+| `GET /Courses/Config` | Public config (library paths) |
+| `GET /Courses/{id}/Structure?userId=` | Course tree with sections, lessons, progress |
+| `GET /Courses/{id}/NextLesson?currentLessonId=` | Next lesson after a given one |
+| `GET /Courses/{id}/ContinueLesson?userId=` | First unplayed lesson |
+| `GET /Courses/{id}/ResourceScan?sectionId=` | Lazy resource scan for a section or course root |
+| `GET /Courses/{id}/Resources?path=` | Serve/download a resource file or zip a folder |
+
+All endpoints except `client.js` require authentication.
 
 ---
 
@@ -85,12 +107,17 @@ The NuGet packages and Docker image are pinned to **10.11.7**. When upgrading, u
 Jellyfin.Plugin.Courses/          # Plugin source
   Api/CoursesController.cs        # REST endpoints + serves client.js
   Configuration/                  # Plugin config page + model
-  Resolvers/                      # Item naming and resolution
+  Model/                          # Course, CourseSection, CourseLesson entities
+  Resolvers/                      # Item resolver + naming utilities
   Web/client.js                   # Frontend (injected into Jellyfin UI)
   Plugin.cs                       # Plugin entry point
+  VideoExtensions.cs              # Shared video extension sets
+  ScriptInjectionTask.cs          # Startup task for UI injection
+  ScriptInjectionPatch.cs         # File Transformation integration
 Jellyfin.Plugin.Courses.Tests/    # xUnit + Moq tests
 docker-compose.yml                # Local Jellyfin dev server
 deploy.sh                         # Build + restart helper
+manifest.json                     # Plugin repository manifest
 jellyfin/                         # Docker volume (gitignored)
 test-courses/                     # Sample media (gitignored)
 ```
@@ -147,6 +174,7 @@ Then add `/media/courses` to the plugin's Course Library Paths setting.
 1. `ScriptInjectionTask` runs at Jellyfin startup. If the [File Transformation](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation) plugin is installed, it registers an in-memory HTML transformation via reflection (`ScriptInjectionPatch`). Otherwise, it falls back to directly writing a `<script>` tag into `index.html` on disk.
 2. `CoursesController` serves `client.js` from embedded resources, replacing the `COURSE_PATHS` placeholder with configured library paths at serve time
 3. `client.js` monitors URL changes and renders a collapsible sidebar when the user navigates to course content
+4. Resource files are loaded lazily per-section via the `ResourceScan` endpoint when a section is expanded, with a 60-second response cache
 
 ### MSBuild Deploy Target
 
