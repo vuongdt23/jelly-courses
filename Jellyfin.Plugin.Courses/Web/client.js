@@ -217,13 +217,9 @@
             var sgSec = sections[sgi];
             var sgCompleted = g(sgSec, 'CompletedCount') || 0;
             var sgTotal = g(sgSec, 'TotalCount') || 0;
-            var sgClass = 'pending';
-            if (sgTotal > 0 && sgCompleted >= sgTotal) {
-                sgClass = 'done';
-            } else if (sgCompleted > 0) {
-                sgClass = 'active';
-            }
-            html += '<div class="cp-seg ' + sgClass + '" style="flex:' + sgTotal + ';"></div>';
+            var sgPct = sgTotal > 0 ? Math.round(sgCompleted / sgTotal * 100) : 0;
+            var sgDone = sgTotal > 0 && sgCompleted >= sgTotal;
+            html += '<div class="cp-seg" style="flex:' + sgTotal + ';"><div class="cp-seg-fill' + (sgDone ? ' done' : '') + '" style="width:' + sgPct + '%;"></div></div>';
         }
         html += '</div>';
 
@@ -263,7 +259,7 @@
 
             html += '<div class="' + secClass + '">'
                 + '<div class="cp-section-hdr" data-cpidx="' + i + '">'
-                + '<span class="cp-section-dot" style="color:' + dotColor + ';">' + dotChar + '</span>'
+                + '<span class="cp-section-dot" data-cp-sec-toggle="' + i + '" title="' + (secDone ? 'Mark all unwatched' : 'Mark all watched') + '" style="color:' + dotColor + ';">' + dotChar + '</span>'
                 + '<span class="cp-section-name' + (secDone ? ' cp-struck' : '') + '">' + esc(sName) + '</span>';
             if (secDone) {
                 html += '<span class="cp-section-badge">DONE</span>';
@@ -345,7 +341,7 @@
         // 3. Section headers — toggle open/close + lazy resource load
         sidebarEl.querySelectorAll('.cp-section-hdr').forEach(function (hdr) {
             hdr.addEventListener('click', function (e) {
-                if (e.target.closest('.cp-section-play')) return;
+                if (e.target.closest('.cp-section-play') || e.target.closest('.cp-section-dot')) return;
                 var idx = this.getAttribute('data-cpidx');
                 var lessonsDiv = sidebarEl.querySelector('.cp-lessons[data-cpidx="' + idx + '"]');
                 if (lessonsDiv) {
@@ -376,6 +372,27 @@
                     ids.push(g(lessons[k], 'Id'));
                 }
                 playItems(ids);
+            });
+        });
+
+        // 4b. Section dot — toggle all lessons in section
+        sidebarEl.querySelectorAll('.cp-section-dot[data-cp-sec-toggle]').forEach(function (dot) {
+            dot.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var secEl = this.closest('.cp-section');
+                if (!secEl) return;
+                var statuses = secEl.querySelectorAll('.cp-lesson-status[data-cp-toggle]');
+                var allPlayed = true;
+                statuses.forEach(function (s) { if (s.getAttribute('data-cp-played') !== '1') allPlayed = false; });
+                // If all played, mark all unwatched; otherwise mark all played
+                statuses.forEach(function (s) {
+                    var alreadyPlayed = s.getAttribute('data-cp-played') === '1';
+                    if (allPlayed && alreadyPlayed) {
+                        togglePlayed(s, sidebarEl, sections);
+                    } else if (!allPlayed && !alreadyPlayed) {
+                        togglePlayed(s, sidebarEl, sections);
+                    }
+                });
             });
         });
 
@@ -590,7 +607,7 @@
         statusEl.title = newPlayed ? 'Mark unwatched' : 'Mark watched';
         statusEl.innerHTML = newPlayed ? '&#10003;' : '&#9675;';
 
-        // Update section count text.
+        // Update section count text and header state.
         var sectionEl = statusEl.closest('.cp-section');
         if (sectionEl) {
             var countEl = sectionEl.querySelector('.cp-section-count');
@@ -599,6 +616,33 @@
             statuses.forEach(function (s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
             var sTotal = statuses.length;
             if (countEl) countEl.textContent = sPlayed + '/' + sTotal;
+
+            var secDone = sTotal > 0 && sPlayed >= sTotal;
+            var secActive = !secDone && sPlayed > 0;
+
+            // Update section dot
+            var dot = sectionEl.querySelector('.cp-section-dot');
+            if (dot) {
+                dot.style.color = secDone ? '#4caf50' : secActive ? '#00a4dc' : '#666';
+                dot.innerHTML = (secDone || secActive) ? '\u25cf' : '\u25cb';
+                dot.title = secDone ? 'Mark all unwatched' : 'Mark all watched';
+            }
+
+            // Update section class
+            sectionEl.className = 'cp-section' + (secDone ? ' cp-sec-complete' : secActive ? ' cp-sec-active' : '');
+
+            // Update section name strikethrough
+            var nameEl = sectionEl.querySelector('.cp-section-name');
+            if (nameEl) nameEl.className = 'cp-section-name' + (secDone ? ' cp-struck' : '');
+
+            // Update done badge
+            var badge = sectionEl.querySelector('.cp-section-badge');
+            if (secDone && !badge) {
+                var countSpan = sectionEl.querySelector('.cp-section-count');
+                if (countSpan) countSpan.insertAdjacentHTML('beforebegin', '<span class="cp-section-badge">DONE</span>');
+            } else if (!secDone && badge) {
+                badge.remove();
+            }
         }
 
         // Update segmented progress bar
@@ -610,7 +654,11 @@
             statuses.forEach(function(s) { if (s.getAttribute('data-cp-played') === '1') sPlayed++; });
             var sTotal = statuses.length;
             if (segs[idx]) {
-                segs[idx].className = 'cp-seg ' + (sPlayed >= sTotal && sTotal > 0 ? 'done' : sPlayed > 0 ? 'active' : 'pending');
+                var fill = segs[idx].querySelector('.cp-seg-fill');
+                if (fill) {
+                    fill.style.width = (sTotal > 0 ? Math.round(sPlayed / sTotal * 100) : 0) + '%';
+                    fill.className = 'cp-seg-fill' + (sPlayed >= sTotal && sTotal > 0 ? ' done' : '');
+                }
             }
         });
 
@@ -1072,10 +1120,9 @@
             + '.cp-close-btn:hover { color: #999; }'
             // Segmented progress
             + '.cp-seg-bar { display: flex; gap: 3px; height: 6px; margin: 10px 14px 0; }'
-            + '.cp-seg { border-radius: 2px; transition: background 0.3s; }'
-            + '.cp-seg.done { background: #4caf50; }'
-            + '.cp-seg.active { background: #00a4dc; }'
-            + '.cp-seg.pending { background: rgba(255,255,255,0.08); }'
+            + '.cp-seg { border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }'
+            + '.cp-seg-fill { height: 100%; background: #00a4dc; border-radius: 2px; transition: width 0.3s, background 0.3s; }'
+            + '.cp-seg-fill.done { background: #4caf50; }'
             // Continue button
             + '.cp-continue-btn { margin: 10px 14px; background: linear-gradient(135deg, #00a4dc, #0090c4); color: #fff; border: none; padding: 10px; border-radius: 6px; font-size: 0.85em; font-weight: 600; cursor: pointer; text-align: center; transition: opacity 0.2s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'
             + '.cp-continue-btn:hover { opacity: 0.9; }'
