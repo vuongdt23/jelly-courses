@@ -17,7 +17,7 @@ public class CoursesController : ControllerBase
 
     private static readonly HashSet<string> _junkExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".url", ".ini", ".nfo", ".html", ".htm"
+        ".url", ".ini", ".nfo"
     };
 
     /// <summary>
@@ -430,6 +430,7 @@ public class CoursesController : ControllerBase
             ".svg" => "image/svg+xml",
             ".webp" => "image/webp",
             ".bmp" => "image/bmp",
+            ".html" or ".htm" => "text/html",
             ".py" or ".js" or ".ts" or ".java" or ".cs" or ".sh" or ".rb" or ".go" or ".rs"
                 or ".c" or ".cpp" or ".h" or ".css" or ".xml" or ".sql"
                 or ".md" or ".markdown" or ".txt" => "text/plain",

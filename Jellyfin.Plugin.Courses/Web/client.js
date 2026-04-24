@@ -1023,6 +1023,8 @@
 
         if (ext === '.pdf') {
             previewPdf(body, fileUrl);
+        } else if (ext === '.html' || ext === '.htm') {
+            previewHtml(body, fileUrl);
         } else if (['.png','.jpg','.jpeg','.gif','.svg','.webp','.bmp','.ico'].indexOf(ext) >= 0) {
             previewImage(body, fileUrl);
         } else if (isCodePreviewable(ext, fileName)) {
@@ -1042,6 +1044,11 @@
     function previewPdf(container, fileUrl) {
         // Use browser's native PDF viewer via iframe — most reliable cross-browser.
         container.innerHTML = '<iframe src="' + fileUrl + '" style="width:100%;height:100%;border:none;background:#fff;"></iframe>';
+    }
+
+    function previewHtml(container, fileUrl) {
+        // Sandboxed iframe renders the document while blocking access to the parent app.
+        container.innerHTML = '<iframe sandbox="allow-same-origin" src="' + fileUrl + '" style="width:100%;height:100%;border:none;background:#fff;"></iframe>';
     }
 
     function previewImage(container, fileUrl) {
