@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Reflection;
 
 namespace Jellyfin.Plugin.Courses.Tests.Api;
 
@@ -266,5 +267,46 @@ public class CoursesControllerTests
         var result = _controller.GetResource(courseId, "../../../etc/passwd");
 
         Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public void ScanResourceFiles_IncludesHtmlFiles()
+    {
+        var tempDir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var htmlPath = Path.Combine(tempDir.FullName, "lesson-notes.html");
+            File.WriteAllText(htmlPath, "<html><body>notes</body></html>");
+
+            var method = typeof(CoursesController).GetMethod(
+                "ScanResourceFiles",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.NotNull(method);
+
+            var result = Assert.IsType<List<ResourceFileDto>>(method!.Invoke(null, [tempDir.FullName, tempDir.FullName]));
+
+            Assert.Contains(result, file => file.Name == "lesson-notes.html");
+        }
+        finally
+        {
+            tempDir.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(".html")]
+    [InlineData(".htm")]
+    public void GetContentType_HtmlExtensions_ReturnTextHtml(string extension)
+    {
+        var method = typeof(CoursesController).GetMethod(
+            "GetContentType",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+
+        var result = Assert.IsType<string>(method!.Invoke(null, [extension]));
+
+        Assert.Equal("text/html", result);
     }
 }
